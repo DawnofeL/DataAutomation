@@ -1,37 +1,12 @@
 # 领域索引
 
-调用时传入的 `domain` 在这里查。查不到就停下来问，不要自己找一个最接近的。
-
-## 已就绪
-
-| domain | 文件 | 主要覆盖层 | 批次权重 |
-|---|---|---|---|
-| `emotion` | `emotion.md` | A2 情绪倾诉 | 13% |
-| `knowledge` | `knowledge.md` | B1 泛知识闲聊 | 11% |
-
-## 待补
-
-下面这些还没写文件。传入会被拒绝。
-
-| domain | 计划覆盖层 | 计划权重 |
+| domain | 文件 | 覆盖层 |
 |---|---|---|
-| `daily-life` | A1 A4 | 20% |
-| `relationship` | A3 C2 | 13% |
-| `gaming` | B2 | 6% |
-| `acg` | B2 | 5% |
-| `opinion` | B3 | 10% |
-| `work-study` | C3 | 3% |
-| `creation` | B2 A4 | 8% |
-| `boundary` | D 全层 | 11% |
+| `emotion` | `emotion.md` | A2 |
+| `knowledge` | `knowledge.md` | B1 |
 
-## 怎么加一个领域
+传入的 domain 不在表内时停下来问，不要改用最接近的一个。
 
-1. 照 `_template.md` 写一份 `<name>.md`
-2. 在上面「已就绪」表里加一行
-3. 不需要改任何代码
+未就绪，传入会被拒绝：`daily-life`、`relationship`、`gaming`、`acg`、`opinion`、`work-study`、`creation`、`boundary`
 
-## 权重说明
-
-权重是**批次层面**的目标，不是每次调用都要满足。一次调用只处理一个 domain，权重决定这个 domain 在整批数据里应该占多少条。
-
-权重合计应为 100%。当前已就绪的两个加起来 24%，其余待补。
+新增一个领域：照 `_template.md` 写一份 `<name>.md`，在上表加一行。
