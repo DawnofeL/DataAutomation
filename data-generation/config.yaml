@@ -1,7 +1,8 @@
 # ============================================================
 # 数据生产配置
-# 所有数字都是「调用几次」，没有百分比。
-# 想多要某一种数据，就把对应的调用次数调大。
+#
+# 所有数字都是「调用几次」或「几轮」，没有百分比，没有概率权重。
+# 想多要某一种数据，就把对应的 calls 调大。
 # ============================================================
 
 
@@ -21,8 +22,6 @@ output_dir: output/
 #
 # 五档的区别只在「有没有一段长的、多长」。每一档都写了「其余仍然短」，
 # 这句是防止一段对话里每条消息都一样长。
-#
-# 想多要短对话 → 把下面 domains 里 P1 的调用次数调大。
 
 profiles:
   P1: "全程短回复来回，最长的一条不超过 30 字"
@@ -40,63 +39,56 @@ max_chars:
   P5: 400
 
 
-# ---------- 轮数 ----------
-# 一轮 = user 说一次 + assistant 回一次。
-# 代码按下面的权重给每段对话抽一个轮数，写进场景卡的 turns 字段。
-# weight 是相对值，不用凑成 100，改一个数字其他的自动重新归一。
-
-turns_default:
-  - {range: [1, 1],   weight: 10}   # 一来一回就结束
-  - {range: [2, 4],   weight: 25}
-  - {range: [5, 8],   weight: 35}
-  - {range: [9, 14],  weight: 22}
-  - {range: [15, 20], weight: 8}    # 长对话
-
-
 # ---------- 领域 ----------
-# 每个领域两组数字：
 #
-#   scenario_calls   场景卡阶段调用几次，每次产 scenario_n 张卡
-#   dialogue_calls   对话阶段每个长度档位各调用几次，每次产 n 段对话
+# scenario_calls   场景卡阶段调用几次，每次产 scenario_n 张卡
 #
-# 这个领域产出多少段对话 = dialogue_calls 里所有数字相加 × n
-# 需要多少张场景卡 = 同上
-# 实际要产的卡 = scenario_calls × scenario_n，比需求多两成左右，
-# 因为去重会丢掉一部分。
+# dialogue_calls   一个列表，每行三个数字：
+#                    profile  用哪个长度档
+#                    turns    这批对话每段几轮（一轮 = user 说一次 + assistant 回一次）
+#                    calls    这一行调用几次
+#                  这一行产出 calls × n 段对话
 #
-# dialogue_calls 的 key 就是这个领域允许用的档位，没写的档位不会被用到。
-# 情绪倾诉不该出现 300 字的大段，所以 emotion 只开到 P3。
+# 领域产出总数 = 所有行的 calls 相加 × n
+# 需要的场景卡数 = 同上
+# 实际要产的卡 = scenario_calls × scenario_n，比需求多两成左右，去重会丢一部分
 #
-# turns 可选，不写就用上面的 turns_default。
+# 用到的 profile 由这些行决定，没出现的档位不会被用。
+# 情绪倾诉不该出现 300 字大段，所以 emotion 里没有 P4 P5。
 
 domains:
 
   emotion:
-    scenario_calls: 14            # 14 × 20 = 280 张卡
+    scenario_calls: 14              # 14 × 20 = 280 张卡
     dialogue_calls:
-      P1: 12
-      P2: 20
-      P3: 14                      # (12+20+14) × 5 = 230 段对话
-    turns:                        # 情绪对话不要太长
-      - {range: [2, 4],  weight: 30}
-      - {range: [5, 8],  weight: 45}
-      - {range: [9, 14], weight: 25}
+      - {profile: P1, turns: 2,  calls: 4}
+      - {profile: P1, turns: 4,  calls: 8}
+      - {profile: P2, turns: 6,  calls: 12}
+      - {profile: P2, turns: 8,  calls: 8}
+      - {profile: P3, turns: 6,  calls: 6}
+      - {profile: P3, turns: 10, calls: 8}
+      # 46 次调用 × 5 = 230 段对话
 
   knowledge:
-    scenario_calls: 12            # 12 × 20 = 240 张卡
+    scenario_calls: 14              # 14 × 20 = 280 张卡
     dialogue_calls:
-      P2: 10
-      P3: 16
-      P4: 14
-      P5: 6                       # (10+16+14+6) × 5 = 230 段对话
+      - {profile: P2, turns: 4,  calls: 6}
+      - {profile: P2, turns: 8,  calls: 6}
+      - {profile: P3, turns: 6,  calls: 8}
+      - {profile: P3, turns: 10, calls: 8}
+      - {profile: P4, turns: 8,  calls: 7}
+      - {profile: P4, turns: 12, calls: 5}
+      - {profile: P5, turns: 10, calls: 4}
+      - {profile: P5, turns: 14, calls: 2}
+      # 46 次调用 × 5 = 230 段对话
 
 
 # ============================================================
-# 上面这份配置一共会发多少次调用：
-#   场景卡  14 + 12                     = 26 次
-#   对话    (12+20+14) + (10+16+14+6)   = 92 次
-#   合计                                = 118 次
-#   产出    92 × 5                      = 460 段对话
+# 这份配置一共发多少次调用：
+#   场景卡  14 + 14   = 28 次
+#   对话    46 + 46   = 92 次
+#   合计              = 120 次
+#   产出    92 × 5    = 460 段对话
 #
-# 跑之前用 plan.py 核对一遍，它会把这些数算给你看。
+# 跑之前用 plan.py 核对，它会把这些数算给你看。
 # ============================================================

@@ -34,11 +34,11 @@
 |---|---|---|
 | `n` | 对话阶段每次调用让模型写几段 | 总调用次数变少，但单次输出变长，靠后的几段质量会掉。建议 5 |
 | `k` | 同时开几路调用 | 跑得快，但容易撞限流。建议 4 |
-| `domains.<领域>.dialogue_calls.<档位>` | 这个领域这个长度档要调用几次 | 这一类的数据变多 |
+| `domains.<领域>.dialogue_calls` 里某一行的 `calls` | 那一行（某个长度档 + 某个轮数）要调用几次 | 这一类的数据变多 |
 
-`m` 不用填，是算出来的：所有 `scenario_calls` 加上所有 `dialogue_calls` 的总和。
+总调用次数不用填，是算出来的：所有 `scenario_calls` 加上所有行的 `calls`。
 
-某个领域的产出条数 = 它的 `dialogue_calls` 全部相加 × `n`。
+某个领域的产出条数 = 它所有行的 `calls` 相加 × `n`。
 
 ### 长度档位
 
@@ -63,42 +63,41 @@ P5  短句为底，其中一轮一口气讲了很多，300 字上下，其余仍
 
 想让数据整体更短，就把各领域 `dialogue_calls` 里 P1 P2 的次数调大、P4 P5 调小。
 
-### 轮数
-
-| 参数 | 是什么 |
-|---|---|
-| `turns_default` | 一段对话几轮的抽样权重。一轮 = user 说一次 + assistant 回一次 |
-| `domains.<领域>.turns` | 覆盖上面的默认值，只对这个领域生效 |
-
-```yaml
-turns_default:
-  - {range: [1, 1],   weight: 10}   # 一来一回就结束
-  - {range: [2, 4],   weight: 25}
-  - {range: [5, 8],   weight: 35}
-  - {range: [9, 14],  weight: 22}
-  - {range: [15, 20], weight: 8}
-```
-
-`weight` 是相对值，不用凑成 100。改一个数字，其余自动重新归一。
-
-代码按这个权重给每段对话抽一个具体轮数，写进场景卡的 `turns` 字段，模型照着写。
-
 ### 领域
 
 | 参数 | 是什么 |
 |---|---|
 | `scenario_n` | 场景卡阶段每次调用产几张卡。卡比对话便宜，可以设大，建议 20 |
 | `domains.<领域>.scenario_calls` | 这个领域的场景卡阶段调用几次 |
-| `domains.<领域>.dialogue_calls` | 一个 dict，key 是长度档位，value 是调用次数 |
+| `domains.<领域>.dialogue_calls` | 一个列表，每行三个数字，见下 |
 
 ```yaml
 domains:
   emotion:
-    scenario_calls: 14                    # 14 × 20 = 280 张卡
-    dialogue_calls: {P1: 12, P2: 20, P3: 14}   # 46 × 5 = 230 段对话
+    scenario_calls: 14              # 14 × 20 = 280 张卡
+    dialogue_calls:
+      - {profile: P1, turns: 2,  calls: 4}
+      - {profile: P1, turns: 4,  calls: 8}
+      - {profile: P2, turns: 6,  calls: 12}
+      - {profile: P2, turns: 8,  calls: 8}
+      - {profile: P3, turns: 6,  calls: 6}
+      - {profile: P3, turns: 10, calls: 8}
+      # 46 次调用 × 5 = 230 段对话
 ```
 
-**`dialogue_calls` 的 key 就是这个领域允许用的档位。** 没写进去的档位不会被用到。emotion 只写了 P1 P2 P3，所以情绪对话里不会出现 300 字的大段。
+`dialogue_calls` 每一行读作：**用这个长度档，写这么多轮的对话，调用这么多次。**
+
+| 字段 | 是什么 |
+|---|---|
+| `profile` | 用哪个长度档，取值 P1~P5 |
+| `turns` | 这一行产出的对话每段几轮。一轮 = user 说一次 + assistant 回一次 |
+| `calls` | 这一行调用几次。这一行产出 `calls × n` 段对话 |
+
+第三行读作「用 P2 的长度形状写 6 轮对话，调用 12 次」，出 60 段。
+
+想多要 6 轮的短对话，就把对应那行的 `calls` 调大。想要新的轮数，就加一行。
+
+**用到哪些档位由这些行决定**，没出现的不会被用。emotion 里没有 P4 P5，所以情绪对话不会冒出 300 字的大段。
 
 **场景卡要比对话多产两成左右。** 去重会丢掉一部分，上例 280 张卡对 230 段对话，留了 50 张余量。
 
@@ -138,10 +137,10 @@ domains:
               每次产 scenario_n 张卡，提示词里带上当前已有卡的清单
                   ↓
 [sample.py]   去重，统计缺口，按原比例补跑直到卡数够
-              给每张卡抽一个轮数写进 turns 字段
+              把 dialogue_calls 每行的 turns 写进分配给该行的卡
                   ↓
 阶段二        把 dialogue_calls 展开成任务队列：
-                (emotion, P1) × 12、(emotion, P2) × 20、……
+                (emotion, P2, 6轮) × 12、(emotion, P3, 10轮) × 8、……
               每个任务领 n 张同领域的卡
               {answer_length} 填成该档位的措辞
               k 路并发跑完
@@ -264,7 +263,7 @@ data-generation/
 data-generation/scripts/
 ├── plan.py          # 干跑：这份 config 会产出什么
 ├── words.py         # 词表和正则的唯一真源
-├── sample.py        # 场景卡去重、缺口统计、轮数抽样
+├── sample.py        # 场景卡去重、缺口统计、按行分配卡与轮数
 ├── generate.py      # 两阶段的任务队列展开与并发调用
 ├── check.py         # 全量硬规则 + 按档位验字数上限
 ├── stats.py         # 实测分布，供回调 config
@@ -279,7 +278,7 @@ data-generation/scripts/
 
 - 场景卡去重。同一批内按具体事物比对，撞车的丢掉并记录缺口。
 - 缺口按原领域比例补跑，直到卡数满足该领域的对话需求。
-- 给每张卡按该领域的 `turns` 分布抽一个轮数，写进 `turns` 字段。
+- 把卡分配给 `dialogue_calls` 的各行，该行的 `turns` 写进这些卡的 `turns` 字段。
 
 **`generate.py`**：
 
