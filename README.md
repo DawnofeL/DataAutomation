@@ -61,6 +61,15 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
 
 # 参数
 
+## api_key
+
+**不写进 `config.yaml`，这个仓库是公开的。** 两种放法，环境变量优先：
+
+```bash
+cp secrets.example.yaml secrets.yaml   # 填 key，.gitignore 挡着，不进仓库
+export DEEPSEEK_API_KEY=sk-...         # 或者用环境变量
+```
+
 ## `config.yaml`
 
 ```yaml
@@ -68,7 +77,6 @@ input_dir: input/
 output_dir: output/
 persona: personas/default.md
 
-api_key: sk-...
 base_url: https://api.deepseek.com
 model: deepseek-v4-flash
 thinking: false
@@ -94,7 +102,6 @@ profile_max_chars: {P1: 40, P2: 100, P3: 130, P4: 280, P5: 400}
 
 | 参数 | 是什么 | 调了会怎样 |
 |---|---|---|
-| `api_key` | DeepSeek 的 key | 没写直接退出 |
 | `base_url` | 接口地址 | 走 OpenAI 兼容格式，换别家也能用 |
 | `model` | `deepseek-v4-flash` / `deepseek-v4-pro` | pro 贵三倍 |
 | `thinking` | 开不开思考 | 开着输出 token 多十倍，轮数更稳。v4-flash 默认是开，这里默认关 |
@@ -402,6 +409,7 @@ DataAutomation/
 ├── agentarenablueprint.md
 │
 ├── config.yaml
+├── secrets.example.yaml          # 抄成 secrets.yaml 填 api_key，后者不进仓库
 │
 ├── input/                        # 讨论点 JSON
 │   └── topics_两性关系.json

@@ -5,7 +5,9 @@ persona: personas/default.md
 
 
 # ---------- 接口 ----------
-api_key: sk-682133b9d5e34028a8c07bfb086577f0
+# api_key 不写在这里。这个文件进仓库，仓库是公开的。
+# 放 secrets.yaml（已 gitignore），或者设环境变量 DEEPSEEK_API_KEY。
+# 抄一份 secrets.example.yaml 改名成 secrets.yaml 即可。
 base_url: https://api.deepseek.com
 model: deepseek-v4-flash
 thinking: false               # 开着输出 token 多几倍，轮数更稳。v4-flash 默认是开，实测见 README

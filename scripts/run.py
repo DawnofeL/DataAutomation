@@ -159,7 +159,7 @@ def main():
     if cfg["profile"] not in cfg["profiles"]:
         sys.exit(f"config.yaml 的 profile 是 {cfg['profile']}，profiles 里没有这一档")
     if not cfg.get("api_key"):
-        sys.exit("config.yaml 里没写 api_key")
+        sys.exit("没有 api_key。放 secrets.yaml，或者设环境变量 DEEPSEEK_API_KEY")
 
     system = llm.build_system(cfg)
     tasks, skipped = build_tasks(cfg)
