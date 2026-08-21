@@ -101,7 +101,8 @@ def print_plan(cfg, tasks, skipped, system):
              for t in tasks]
 
     print(f"\n{len(tasks)} 次调用  →  {n_dialogues} 段对话")
-    print(f"参数 {cfg['model']}  {cfg['profile']}  {cfg['turns']} 轮  "
+    print(f"参数 {cfg['model']}  {cfg['profile']}  "
+          f"{cfg['min_turns']}-{cfg['max_turns']} 轮  "
           f"思考{'开' if cfg['thinking'] else '关'}")
     print(f"预估 {accounting.fmt(accounting.estimate(cfg, system, users, n_dialogues))}")
 

@@ -8,7 +8,7 @@ persona: personas/default.md
 api_key: sk-682133b9d5e34028a8c07bfb086577f0
 base_url: https://api.deepseek.com
 model: deepseek-v4-flash
-thinking: true                # 关掉输出 token 少几倍，但凑不满 turns，实测见 README
+thinking: false               # 开着输出 token 多几倍，轮数更稳。v4-flash 默认是开，实测见 README
 timeout: 600                  # 单次请求超时，秒
 
 
@@ -20,7 +20,8 @@ max_retry: 2                  # 格式坏了或轮数不对，重发几次
 
 # ---------- 这批对话的形状 ----------
 profile: P2                   # 用哪个长度形状，见下
-turns: 8                      # 每段几轮。8 轮 = user 说 8 次 + assistant 回 8 次 = 16 条消息
+min_turns: 4                  # 每段最少几轮。1 轮 = user 说一次 + assistant 回一次
+max_turns: 8                  # 每段最多几轮。落在区间里由讨论点本身决定，不硬凑
 
 
 # ---------- 长度形状 ----------

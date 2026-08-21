@@ -27,8 +27,8 @@ cfg 一律由调用方传进来。
     │    {n}               ← 这一批有几条讨论点                          │
     │    {points}          ← 「id  两个空格  point」逐行列出             │
     │    {first_id}        ← 这一批第一条讨论点的 id，当格式示例         │
-    │    {turns}           ← cfg["turns"]                                │
-    │    {messages}        ← cfg["turns"] × 2                            │
+    │    {min_turns}       ← cfg["min_turns"]                            │
+    │    {max_turns}       ← cfg["max_turns"]                            │
     │    {answer_length}   ← cfg["profiles"][cfg["profile"]]             │
     └───────────────────────────────────────────────────────────────────┘
 
@@ -36,7 +36,8 @@ cfg 一律由调用方传进来。
     ┌───────────────────────────────────────────────────────────────────┐
     │  prompts/retry.md                                                  │
     │    {problems}        ← find_problems() 挑出来的毛病清单            │
-    │    {turns}           ← cfg["turns"]                                │
+    │    {min_turns}       ← cfg["min_turns"]                            │
+    │    {max_turns}       ← cfg["max_turns"]                            │
     └───────────────────────────────────────────────────────────────────┘
 
 system 每次调用一字不差，走 DeepSeek 的 prompt cache，第二次起这段按 cache hit
@@ -125,7 +126,7 @@ def build_user(cfg, domain, keyword, opinion, points):
     """拼 user 消息：骨架 prompts/user.md + 这一批讨论点 + 长度形状。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 turns、profile、profiles。
+        cfg (dict): config.yaml 的内容。用到 min_turns、max_turns、profile、profiles。
         domain (str): 领域，input JSON 的 domain。
         keyword (str): 这一批讨论点属于哪个关键词。
         opinion (str): assistant 在这个领域的立场，input JSON 的 opinion。
@@ -141,8 +142,8 @@ def build_user(cfg, domain, keyword, opinion, points):
         "{n}": str(len(points)),
         "{points}": "\n".join(f"{p['id']}  {p['point']}" for p in points),
         "{first_id}": points[0]["id"],
-        "{turns}": str(cfg["turns"]),
-        "{messages}": str(cfg["turns"] * 2),
+        "{min_turns}": str(cfg["min_turns"]),
+        "{max_turns}": str(cfg["max_turns"]),
         "{answer_length}": cfg["profiles"][cfg["profile"]],
     })
 
@@ -151,7 +152,7 @@ def build_retry(cfg, problems):
     """拼重发时追加在 user 后面的那段：骨架 prompts/retry.md。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 turns。
+        cfg (dict): config.yaml 的内容。用到 min_turns、max_turns。
         problems (list[str]): find_problems() 挑出来的毛病，一条一行。
 
     Returns:
@@ -159,7 +160,8 @@ def build_retry(cfg, problems):
     """
     return _fill("retry.md", {
         "{problems}": "\n".join(problems),
-        "{turns}": str(cfg["turns"]),
+        "{min_turns}": str(cfg["min_turns"]),
+        "{max_turns}": str(cfg["max_turns"]),
     })
 
 
@@ -229,11 +231,12 @@ def find_problems(cfg, text, points):
     用的就是 parse.py 那套解析和校验，标准跟落盘时一模一样。这样报 ok 的批次
     parse.py 一定收得下，不会出现「跑完说成功、解析时全灭」。
 
-    查三件事：讨论点有没有漏、有没有多、每段轮数和角色顺序对不对。
+    查三件事：讨论点有没有漏、有没有多、每段轮数落没落在
+    [min_turns, max_turns] 区间里、角色顺序对不对。
     内容写得好不好一概不管，那是 check.py 的事。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 turns。
+        cfg (dict): config.yaml 的内容。用到 min_turns、max_turns。
         text (str): 模型返回的原文。
         points (list[dict]): 这一批要的讨论点。
 
@@ -247,7 +250,7 @@ def find_problems(cfg, text, points):
         if did not in want:
             problems.append(f"{did} 不属于这一批，删掉")
             continue
-        problems += parse.validate(did, messages, cfg["turns"])
+        problems += parse.validate(did, messages, cfg)
     problems += [f"{did} 整条没写" for did in sorted(want - seen)]
     return problems
 

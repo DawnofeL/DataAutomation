@@ -92,10 +92,10 @@ def estimate(cfg, system, users, n_dialogues):
     """开跑前拍一个用量，字段名和官方 usage 对齐，能直接喂给 fmt()。
 
     system 每次调用一字不差，只有最先发出去的那几路会 cache miss，后面都命中。
-    并发几路就按几路 miss 算，估得保守一点。
+    并发几路就按几路 miss 算。输出按 max_turns 算，都往贵了估。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 concurrency、turns。
+        cfg (dict): config.yaml 的内容。用到 concurrency、max_turns。
         system (str): llm.build_system() 的结果。
         users (list[str]): 每次调用的 user 消息。
         n_dialogues (int): 这一趟一共要产出几段对话。
@@ -111,7 +111,7 @@ def estimate(cfg, system, users, n_dialogues):
         ),
         "prompt_cache_hit_tokens": int(system_tokens * max(0, len(users) - miss_calls)),
         "completion_tokens": int(
-            n_dialogues * cfg["turns"] * 2 * CHARS_PER_MESSAGE / CHARS_PER_TOKEN
+            n_dialogues * cfg["max_turns"] * 2 * CHARS_PER_MESSAGE / CHARS_PER_TOKEN
         ),
     }
 

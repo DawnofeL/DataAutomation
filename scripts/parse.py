@@ -50,10 +50,14 @@ def parse_raw(text):
     return blocks
 
 
-def validate(did, msgs, turns):
+def validate(did, msgs, cfg):
+    """轮数落在 [min_turns, max_turns] 区间内，角色严格交替，没有空消息。"""
     errs = []
-    if len(msgs) != turns * 2:
-        errs.append(f"{did}: {len(msgs)} 条消息，应为 {turns*2} 条（{turns} 轮）")
+    low, high = cfg["min_turns"], cfg["max_turns"]
+    if len(msgs) % 2:
+        errs.append(f"{did}: {len(msgs)} 条消息，是单数，最后一条得是 A")
+    elif not low * 2 <= len(msgs) <= high * 2:
+        errs.append(f"{did}: {len(msgs) // 2} 轮，要 {low} 到 {high} 轮")
     for i, (role, content) in enumerate(msgs):
         want = "user" if i % 2 == 0 else "assistant"
         if role != want:
@@ -78,7 +82,7 @@ def parse_all(cfg):
         domain = f.stem.split("_")[0]
         lookup = points.get(domain, {})
         for did, msgs in parse_raw(f.read_text(encoding="utf-8")):
-            e = validate(did, msgs, cfg["turns"])
+            e = validate(did, msgs, cfg)
             if e:
                 errs += [f"{f.name}  {x}" for x in e]
                 continue
@@ -86,6 +90,7 @@ def parse_all(cfg):
             by_domain.setdefault(domain, []).append({
                 "source": f"{kw}/{did}",
                 "point": point,
+                "turns": len(msgs) // 2,
                 "messages": [{"role": r, "content": c} for r, c in msgs],
             })
 
@@ -104,7 +109,8 @@ def parse_all(cfg):
             "persona": cfg["persona"],
             "domain": domain,
             "profile": cfg["profile"],
-            "turns": cfg["turns"],
+            "min_turns": cfg["min_turns"],
+            "max_turns": cfg["max_turns"],
             "dialogues": dialogues,
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         written.append(out)

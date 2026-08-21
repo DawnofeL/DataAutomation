@@ -71,7 +71,7 @@ persona: personas/default.md
 api_key: sk-...
 base_url: https://api.deepseek.com
 model: deepseek-v4-flash
-thinking: true
+thinking: false
 timeout: 600
 
 dialogue_gen_per_call: 2
@@ -79,7 +79,8 @@ concurrency: 4
 max_retry: 2
 
 profile: P2
-turns: 8
+min_turns: 4
+max_turns: 8
 
 profiles:
   P1: "全程短回复来回，最长的一条不超过 30 字"
@@ -96,29 +97,38 @@ profile_max_chars: {P1: 40, P2: 100, P3: 130, P4: 280, P5: 400}
 | `api_key` | DeepSeek 的 key | 没写直接退出 |
 | `base_url` | 接口地址 | 走 OpenAI 兼容格式，换别家也能用 |
 | `model` | `deepseek-v4-flash` / `deepseek-v4-pro` | pro 贵三倍 |
-| `thinking` | 开不开思考 | 关掉输出 token 少几倍，但凑不满 `turns`，见下 |
+| `thinking` | 开不开思考 | 开着输出 token 多十倍，轮数更稳。v4-flash 默认是开，这里默认关 |
 | `timeout` | 单次请求超时，秒 | 思考开着一次要一两分钟，别设太短 |
 | `dialogue_gen_per_call` | 每次调用产出几段对话 | 见下 |
 | `concurrency` | 同时开几路 | 跑得快，容易撞限流 |
 | `max_retry` | 格式坏了重发几次 | 重发一次的钱等于跑一次 |
 | `profile` | 这批对话的长度形状 | 换档，从全短到含大段 |
-| `turns` | 每段几轮。8 轮 = 16 条消息 | 对话变长，也更难凑满 |
+| `min_turns` / `max_turns` | 每段几轮的上下限 | 区间内由讨论点自己决定，卡死成一个数会逼模型注水 |
 | `profile_max_chars` | 质检的单条字数上限 | 放宽或收紧判定 |
 
-## `thinking` 和 `dialogue_gen_per_call`
+## 轮数
 
-一次要几段，直接决定模型能不能把每段写够 `turns` 轮。同一批讨论点实测：
+`min_turns` 到 `max_turns` 是区间，具体几轮由讨论点本身决定，`prompts/user.md`
+里明确禁止为了凑数注水、为了收短硬砍。15 条讨论点跑出来的实际分布：
 
-| 配置 | 每段实际拿到几条消息（要 16 条） |
+| 轮数 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|
+| 段数 | 3 | 7 | 4 | 1 | 0 |
+
+落在区间外的段整批重发，重发 `max_retry` 次还不行就跳过，raw 不落盘。
+`dialogues_*.json` 里每一段都带自己的 `turns`。
+
+早先把轮数卡死成一个数（`turns: 8`）时，模型经常只写四五轮就收尾，
+`finish_reason` 是 `stop` 不是截断，重发也只是一轮轮往上挪：
+
+| 配置 | 每段实际拿到几条消息（当时要 16 条） |
 |---|---|
 | 思考关，一次 5 段 | 12 / 11 / 10 / 12 / 12 |
 | 思考开，一次 5 段 | 10 / 10 / 10 / 10 / 10 |
 | 思考关，一次 2 段 | 14 / 14 |
 | 思考开，一次 2 段 | 16 / 16 |
 
-`finish_reason` 全是 `stop`，不是被截断，是模型自己觉得写完了。所以默认
-`thinking: true` + `dialogue_gen_per_call: 2`。轮数不够的批次会带着毛病清单重发，
-重发 `max_retry` 次还不行就跳过，raw 不落盘。
+改成区间之后，思考关、一次 2 段，9 批全过，15 条讨论点落地 15 段。
 
 ## 长度形状
 
@@ -167,11 +177,13 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
   "persona": "personas/default.md",
   "domain": "两性关系",
   "profile": "P2",
-  "turns": 8,
+  "min_turns": 4,
+  "max_turns": 8,
   "dialogues": [
     {
       "source": "彩礼/1-1",
       "point": "结婚要不要给彩礼，给多少算合适",
+      "turns": 8,
       "messages": [
         {"role": "user",      "content": "..."},
         {"role": "assistant", "content": "..."}
@@ -181,7 +193,8 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
 }
 ```
 
-`persona`、`profile`、`turns` 记在顶层，不逐条重复。`source` 用来定位回哪条讨论点。
+`persona`、`profile`、`min_turns`、`max_turns` 记在顶层，不逐条重复。
+每段自己的 `turns` 逐条记，因为它是变的。`source` 用来定位回哪条讨论点。
 
 ---
 
@@ -205,29 +218,28 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
   生小孩          5 条讨论点  →  3 次调用
 
 9 次调用  →  15 段对话
-参数 deepseek-v4-flash  P2  8 轮  思考开
-预估 输入未命中 3.0 万  输入命中缓存 3.5 万  输出 0.4 万
+参数 deepseek-v4-flash  P2  4-8 轮  思考关
+预估 输入未命中 3.1 万  输入命中缓存 3.5 万  输出 0.4 万
 
 继续？[y/N] y
 
-  [1/9] 两性关系/彩礼 第2批                  ok
-  [2/9] 两性关系/约会 第1批                  2-1: 12 条消息，应为 16 条（8 轮）；2-2: 12 条消息，应为 16 条（8 轮）
+  [1/9] 两性关系/约会 第1批                  ok
+  [2/9] 两性关系/彩礼 第3批                  ok
   ...
-  [9/9] 两性关系/彩礼 第1批                  ok
+  [9/9] 两性关系/生小孩 第1批                 ok
 
-实际 输入未命中 0.1 万  输入命中缓存 7.7 万  输出 4.5 万  其中思考 3.9 万
-余额 97.31 → 97.31 CNY（扣费有延迟，两个数一样是正常的）
+实际 输入未命中 0.4 万  输入命中缓存 6.2 万  输出 0.4 万
+余额 92.69 → 92.28 CNY（扣费有延迟，两个数一样是正常的）
 
-1 批没跑成，raw 不完整：
-  两性关系/约会 第1批: 2-1: 12 条消息，应为 16 条（8 轮）；2-2: 12 条消息，应为 16 条（8 轮）
+解析 15 段  →  dialogues_两性关系.json
 
-解析 13 段  →  dialogues_两性关系.json
-
-质检 13 段对话
-  硬失败 1
-    [dialogues_两性关系] 彩礼/1-2 第8条  禁用表述「说白了」
-  警告 4
-    [dialogues_两性关系] 彩礼/1-3  各条长度太齐，变异系数 0.30
+质检 15 段对话
+  硬失败 11
+    [dialogues_两性关系] 彩礼/1-3 第6条  提示性冒号
+    [dialogues_两性关系] 生小孩/3-3 第2条  问句结尾
+    ...
+  警告 9
+    [dialogues_两性关系] 彩礼/1-2  各条长度太齐，变异系数 0.14
     ...
 
 ✓ output/dialogues_两性关系.json
@@ -257,7 +269,18 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
 1-1  结婚要不要给彩礼，给多少算合适
 1-2  彩礼收了之后归谁管
 
-每段严格 8 轮：U 写 8 行，A 写 8 行，交替，一共 16 行，最后一行是 A。少一行都算废稿。
+每段 4 到 8 轮。一轮是 U 一行、A 一行，交替，最后一行是 A。
+
+轮数按这个讨论点本身该聊多久来定：三两句能说完的就 4 轮收，需要来回掰扯的就往 8 轮走。同一批里的几段不许一样长。
+
+严禁为了凑够轮数注水。以下都算注水，出现即废稿：
+
+- 把上一轮的意思换个说法再说一遍
+- 「嗯」「好的」「明白了」这类空附和单独占一轮
+- 明知故问，问一个前面已经答过的东西
+- 结尾多加一轮客套
+
+严禁为了收短硬砍。话没说完就「行吧我知道了」「那我再想想」草草收场，也是废稿。
 
 这批对话的长度形状：以短句为主，偶尔一条到 60 至 80 字，其余仍然短
 
@@ -280,17 +303,17 @@ A 你回的话
 
 ## 重发时追加的
 
-轮数不够或者漏了讨论点，`prompts/retry.md` 接在 user 末尾重发：
+轮数出界或者漏了讨论点，`prompts/retry.md` 接在 user 末尾重发：
 
 ```
 ---
 
 上一次输出不合格：
 
-2-1: 12 条消息，应为 16 条（8 轮）
-2-2: 12 条消息，应为 16 条（8 轮）
+2-1: 3 轮，要 4 到 8 轮
+2-2: 3 轮，要 4 到 8 轮
 
-重新输出这一批的全部讨论点，每段严格 8 轮，每段最后一条必须是 A。格式不变。
+重新输出这一批的全部讨论点，每段 4 到 8 轮，每段最后一条必须是 A。格式不变。轮数不够就把没聊透的地方接着聊，不许拿空话补位。
 ```
 
 每次重发都从原始 user 重新接，不把上一轮的清单叠上去。
@@ -333,11 +356,13 @@ A 你想怎么拿
   "persona": "personas/default.md",
   "domain": "两性关系",
   "profile": "P2",
-  "turns": 8,
+  "min_turns": 4,
+  "max_turns": 8,
   "dialogues": [
     {
       "source": "彩礼/1-1",
       "point": "结婚要不要给彩礼，给多少算合适",
+      "turns": 8,
       "messages": [
         {"role": "user",      "content": "结婚彩礼这事，你们那边一般给多少"},
         {"role": "assistant", "content": "看地方吧，我这边普通人家十万上下"},
@@ -379,8 +404,8 @@ DataAutomation/
 ├── prompts/                      # 所有提示词，py 里一个字都没有
 │   ├── system.md                 # 占位符 {persona} {words} {alive_dialogue} {knowledge_honesty}
 │   ├── user.md                   # 占位符 {domain} {keyword} {opinion} {n} {points}
-│   │                             #        {first_id} {turns} {messages} {answer_length}
-│   └── retry.md                  # 占位符 {problems} {turns}
+│   │                             #        {first_id} {min_turns} {max_turns} {answer_length}
+│   └── retry.md                  # 占位符 {problems} {min_turns} {max_turns}
 │
 ├── personas/
 │   └── default.md
