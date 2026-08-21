@@ -4,7 +4,14 @@
 
 ```
 input/topics_*.json  →  run.py  →  output/dialogues_*.json
+                          │
+                          ├── llm.py     拼 system 和 user，调 DeepSeek
+                          ├── parse.py   模型吐的纯文本 → JSON
+                          └── check.py   质检
 ```
+
+一条命令跑完。所有和大模型打交道的代码都在 `scripts/llm.py` 一个文件里，
+其他脚本不碰提示词也不碰 HTTP。
 
 讨论点 JSON 由 topic-generation 那个独立 skill 产出，不在本仓库。
 
@@ -59,9 +66,14 @@ input_dir: input/
 output_dir: output/
 persona: personas/default.md
 
-dialogue_gen_per_call: 5
+api_key: sk-...
+base_url: https://api.deepseek.com
+model: deepseek-v4-flash
+thinking: true
+timeout: 600
+
+dialogue_gen_per_call: 2
 concurrency: 4
-model: deepseek-chat
 max_retry: 2
 
 profile: P2
@@ -75,15 +87,42 @@ profiles:
   P5: "短句为底，其中一轮一口气讲了很多，300 字上下，其余仍然短"
 
 profile_max_chars: {P1: 40, P2: 100, P3: 130, P4: 280, P5: 400}
+
+price:
+  input_cache_hit: 0.014
+  input_cache_miss: 0.44
+  output: 1.32
 ```
 
-| 参数 | 是什么 | 调大会怎样 |
+| 参数 | 是什么 | 调了会怎样 |
 |---|---|---|
-| `dialogue_gen_per_call` | 每次调用产出几段对话 | 调用次数变少，单次输出变长，靠后几段质量会掉。建议 5 |
-| `concurrency` | 同时开几路 | 跑得快，容易撞限流。建议 4 |
+| `api_key` | DeepSeek 的 key | 没写直接退出 |
+| `base_url` | 接口地址 | 走 OpenAI 兼容格式，换别家也能用 |
+| `model` | `deepseek-v4-flash` / `deepseek-v4-pro` | pro 贵三倍 |
+| `thinking` | 开不开思考 | 关掉输出 token 少几倍，但凑不满 `turns`，见下 |
+| `timeout` | 单次请求超时，秒 | 思考开着一次要一两分钟，别设太短 |
+| `dialogue_gen_per_call` | 每次调用产出几段对话 | 见下 |
+| `concurrency` | 同时开几路 | 跑得快，容易撞限流 |
+| `max_retry` | 格式坏了重发几次 | 重发一次的钱等于跑一次 |
 | `profile` | 这批对话的长度形状 | 换档，从全短到含大段 |
-| `turns` | 每段几轮。8 轮 = 16 条消息 | 对话变长 |
+| `turns` | 每段几轮。8 轮 = 16 条消息 | 对话变长，也更难凑满 |
 | `profile_max_chars` | 质检的单条字数上限 | 放宽或收紧判定 |
+| `price` | 美元 / 百万 token | 只影响屏幕上印的钱数 |
+
+## `thinking` 和 `dialogue_gen_per_call`
+
+一次要几段，直接决定模型能不能把每段写够 `turns` 轮。同一批讨论点实测：
+
+| 配置 | 每段实际拿到几条消息（要 16 条） |
+|---|---|
+| 思考关，一次 5 段 | 12 / 11 / 10 / 12 / 12 |
+| 思考开，一次 5 段 | 10 / 10 / 10 / 10 / 10 |
+| 思考关，一次 2 段 | 14 / 14 |
+| 思考开，一次 2 段 | 16 / 16 |
+
+`finish_reason` 全是 `stop`，不是被截断，是模型自己觉得写完了。所以默认
+`thinking: true` + `dialogue_gen_per_call: 2`。轮数不够的批次会带着毛病清单重发，
+重发 `max_retry` 次还不行就跳过，raw 不落盘。
 
 ## 长度形状
 
@@ -103,16 +142,17 @@ P2 的一段 8 轮对话，assistant 各条实际字数可能是：
 一次调用 = 同一个 keyword 的 dialogue_gen_per_call 条讨论点
 ```
 
-按 keyword 切，一次调用只带一个话题，上下文干净。
+按 keyword 切，一次调用只带一个话题，上下文干净。system 每次调用一字不差，
+第二次起走 DeepSeek 的 prompt cache，按 cache hit 计价，便宜 30 倍。
 
-45 条讨论点、`dialogue_gen_per_call: 5`：
+45 条讨论点、`dialogue_gen_per_call: 2`：
 
 | keyword | 讨论点 | 调用 |
 |---|---|---|
-| 彩礼 | 15 | 3 |
-| 约会 | 15 | 3 |
-| 生小孩 | 15 | 3 |
-| | | **9 次调用，45 段对话** |
+| 彩礼 | 15 | 8 |
+| 约会 | 15 | 8 |
+| 生小孩 | 15 | 8 |
+| | | **24 次调用，45 段对话** |
 
 ---
 
@@ -150,35 +190,57 @@ P2 的一段 8 轮对话，assistant 各条实际字数可能是：
 ## 命令
 
 ```bash
-python scripts/run.py
+python scripts/run.py            打印预估，等确认后跑
+python scripts/run.py --yes      不问直接跑
+python scripts/run.py --plan     只打印预估，不发请求
+python scripts/run.py --preview  打印第一批拼好的 system 和 user，不发请求
 ```
 
 ## 屏幕上
 
 ```
-两性关系  3 个关键词，45 条讨论点
-9 次调用  →  45 段对话
-参数 P2 / 8 轮
-预估 输入 10.8 万 token，输出 3.6 万 token，约 ¥0.5
+两性关系  3 个关键词，15 条讨论点
+  彩礼           5 条讨论点  →  3 次调用
+  约会           5 条讨论点  →  3 次调用
+  生小孩          5 条讨论点  →  3 次调用
+
+9 次调用  →  15 段对话
+参数 deepseek-v4-flash  P2  8 轮  思考开
+预估 输入 6.6 万（命中 4.4 万）  输出 0.4 万  $0.02
 
 继续？[y/N] y
 
-  [1/9] 彩礼 1-1~1-5 ........... ok
-  [2/9] 彩礼 1-6~1-10 .......... ok
+  [1/9] 两性关系/彩礼 第2批                  ok
+  [2/9] 两性关系/约会 第1批                  2-1: 12 条消息，应为 16 条（8 轮）；2-2: 12 条消息，应为 16 条（8 轮）
   ...
-  [9/9] 生小孩 3-11~3-15 ....... ok
+  [9/9] 两性关系/彩礼 第1批                  ok
 
-解析 45 段
-质检 硬失败 0，警告 2
-      跨对话开场撞车：3 段以「我男朋友」开头
-      反问收尾过密：4 段倒数第二轮用了反问
+实际 输入 13.1 万（命中 12.8 万）  输出 7.3 万  $0.10
+
+1 批没跑成，raw 不完整：
+  两性关系/约会 第1批: 2-1: 12 条消息，应为 16 条（8 轮）；2-2: 12 条消息，应为 16 条（8 轮）
+
+解析 13 段  →  dialogues_两性关系.json
+
+质检 13 段对话
+  硬失败 1
+    [dialogues_两性关系] 彩礼/1-2 第8条  禁用表述「说白了」
+  警告 4
+    [dialogues_两性关系] 彩礼/1-3  各条长度太齐，变异系数 0.30
+    ...
 
 ✓ output/dialogues_两性关系.json
 ```
 
-不想被问就 `python scripts/run.py --yes`。
+「预估」按 `price` 算，「实际」按接口返回的 `usage` 算。没跑成的批次 raw 不落盘，
+下次重跑只会重跑它们。
 
-## 发出去的 user 消息
+## 发出去的 system
+
+`prompts/system.md` 填完四个占位符，一万字上下，每次调用一字不差。
+`python scripts/run.py --preview` 原样打出来。
+
+## 发出去的 user
 
 `prompts/user.md` 填完占位符之后：
 
@@ -189,15 +251,12 @@ python scripts/run.py
 你在这个领域的立场：
 男女平等，有话直说好过猜，别把每件小事都上升成不爱了
 
-下面 5 个问题，每个写一段对话。
+下面 2 个问题，每个写一段对话。
 
 1-1  结婚要不要给彩礼，给多少算合适
 1-2  彩礼收了之后归谁管
-1-3  彩礼谈不拢要不要分手
-1-4  男方出了彩礼女方要不要陪嫁
-1-5  双方家庭对彩礼的期待差太远怎么办
 
-每段 8 轮。一轮是 user 说一次 assistant 回一次。
+每段严格 8 轮：U 写 8 行，A 写 8 行，交替，一共 16 行，最后一行是 A。少一行都算废稿。
 
 这批对话的长度形状：以短句为主，偶尔一条到 60 至 80 字，其余仍然短
 
@@ -207,14 +266,33 @@ python scripts/run.py
 
 输出格式：
 
-=== 讨论点id
+=== 1-1
 U 用户说的话
 A 你回的话
+U 用户说的话
+A 你回的话
+
+`=== ` 后面原样抄上面列出的编号，不写「讨论点」三个字，不加别的字。
 
 一条消息一行，不换行。段与段之间空一行。不写序号，不写引号，不写任何解释。
 ```
 
-system 是 `prompts/system.md` 填完 persona 和三份 references。
+## 重发时追加的
+
+轮数不够或者漏了讨论点，`prompts/retry.md` 接在 user 末尾重发：
+
+```
+---
+
+上一次输出不合格：
+
+2-1: 12 条消息，应为 16 条（8 轮）
+2-2: 12 条消息，应为 16 条（8 轮）
+
+重新输出这一批的全部讨论点，每段严格 8 轮，每段最后一条必须是 A。格式不变。
+```
+
+每次重发都从原始 user 重新接，不把上一轮的清单叠上去。
 
 ## 模型返回
 
@@ -222,25 +300,27 @@ system 是 `prompts/system.md` 填完 persona 和三份 references。
 
 ```
 === 1-1
-U 我妈说彩礼得给二十万
-A 二十万，你俩商量过没
-U 没有，他还不知道
-A 那先跟他说，别让两边家长直接对上
-U 我怕他觉得多
-A 他觉得多也正常，二十万不是小数
-U 那怎么办
-A 你们俩先对一个数，再一起去跟家里谈。这事只要变成两家人隔空喊价就没法收场了，中间没人翻译，谁的话到对面都变味
+U 结婚彩礼这事，你们那边一般给多少
+A 看地方吧，我这边普通人家十万上下
+U 十万也不算少了吧
+A 嗯，差不多是行情价
+U 那要是女方非要三十万呢
+A 我会先问一句，这钱是带回小家还是留给娘家，方向完全不一样
+U 有区别吗，不都是给出去的钱
+A 区别大了，带回小家等于左手倒右手
+U 那你觉得给多少算合适
+A 量力而行吧，家里拿得出就多给点
+U 我见过有人为彩礼借了一屁股债
+A 图个面子呗，最后日子还是自己过的
+U 所以你是不支持给彩礼那种
+A 也不是，给可以，但别让这个数变成负担
 U 有道理
-A 嗯，你们俩得是一边的
-U 我今晚跟他说
-A 说完告诉我他什么反应
+A 不然一开始就埋了根刺
 
 === 1-2
-U 彩礼给了之后是给我爸妈还是我自己拿着
+U 彩礼收了之后一般谁管
 A 你想怎么拿
 （同样 8 轮）
-
-=== 1-3 到 1-5 同上
 ```
 
 `=== ` 分段，`U ` / `A ` 定角色。解析成功后 `output/raw/` 删掉。
@@ -258,18 +338,22 @@ A 你想怎么拿
       "source": "彩礼/1-1",
       "point": "结婚要不要给彩礼，给多少算合适",
       "messages": [
-        {"role": "user",      "content": "我妈说彩礼得给二十万"},
-        {"role": "assistant", "content": "二十万，你俩商量过没"},
-        {"role": "user",      "content": "没有，他还不知道"},
-        {"role": "assistant", "content": "那先跟他说，别让两边家长直接对上"},
-        {"role": "user",      "content": "我怕他觉得多"},
-        {"role": "assistant", "content": "他觉得多也正常，二十万不是小数"},
-        {"role": "user",      "content": "那怎么办"},
-        {"role": "assistant", "content": "你们俩先对一个数，再一起去跟家里谈。这事只要变成两家人隔空喊价就没法收场了，中间没人翻译，谁的话到对面都变味"},
+        {"role": "user",      "content": "结婚彩礼这事，你们那边一般给多少"},
+        {"role": "assistant", "content": "看地方吧，我这边普通人家十万上下"},
+        {"role": "user",      "content": "十万也不算少了吧"},
+        {"role": "assistant", "content": "嗯，差不多是行情价"},
+        {"role": "user",      "content": "那要是女方非要三十万呢"},
+        {"role": "assistant", "content": "我会先问一句，这钱是带回小家还是留给娘家，方向完全不一样"},
+        {"role": "user",      "content": "有区别吗，不都是给出去的钱"},
+        {"role": "assistant", "content": "区别大了，带回小家等于左手倒右手"},
+        {"role": "user",      "content": "那你觉得给多少算合适"},
+        {"role": "assistant", "content": "量力而行吧，家里拿得出就多给点"},
+        {"role": "user",      "content": "我见过有人为彩礼借了一屁股债"},
+        {"role": "assistant", "content": "图个面子呗，最后日子还是自己过的"},
+        {"role": "user",      "content": "所以你是不支持给彩礼那种"},
+        {"role": "assistant", "content": "也不是，给可以，但别让这个数变成负担"},
         {"role": "user",      "content": "有道理"},
-        {"role": "assistant", "content": "嗯，你们俩得是一边的"},
-        {"role": "user",      "content": "我今晚跟他说"},
-        {"role": "assistant", "content": "说完告诉我他什么反应"}
+        {"role": "assistant", "content": "不然一开始就埋了根刺"}
       ]
     }
   ]
@@ -293,7 +377,9 @@ DataAutomation/
 │
 ├── prompts/                      # 所有提示词，py 里一个字都没有
 │   ├── system.md                 # 占位符 {persona} {words} {alive_dialogue} {knowledge_honesty}
-│   └── user.md                   # 占位符 {domain} {keyword} {opinion} {n} {points} {turns} {answer_length}
+│   ├── user.md                   # 占位符 {domain} {keyword} {opinion} {n} {points}
+│   │                             #        {first_id} {turns} {messages} {answer_length}
+│   └── retry.md                  # 占位符 {problems} {turns}
 │
 ├── personas/
 │   └── default.md
@@ -304,7 +390,8 @@ DataAutomation/
 │   └── knowledge-honesty.md      # 涉及事实时的边界
 │
 ├── scripts/
-│   ├── run.py                    # 唯一入口，一条命令跑完
+│   ├── run.py                    # 唯一入口：分批、并发、落盘、打印
+│   ├── llm.py                    # 上下文组装 + 推理，涉及大模型的代码全在这里
 │   ├── parse.py                  # 被 run.py 调用，也能单独重新解析已有 raw
 │   └── check.py                  # 被 run.py 调用，也能单独重查已有 json
 │

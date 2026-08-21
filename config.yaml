@@ -4,10 +4,17 @@ output_dir: output/
 persona: personas/default.md
 
 
+# ---------- 接口 ----------
+api_key: sk-682133b9d5e34028a8c07bfb086577f0
+base_url: https://api.deepseek.com
+model: deepseek-v4-flash
+thinking: true                # 关掉输出 token 少几倍，但凑不满 turns，实测见 README
+timeout: 600                  # 单次请求超时，秒
+
+
 # ---------- 调用 ----------
-dialogue_gen_per_call: 5      # 每次调用产出几段对话
+dialogue_gen_per_call: 2      # 每次调用产出几段对话。调大到 5 模型就凑不满 turns
 concurrency: 4                # 同时开几路
-model: deepseek-chat
 max_retry: 2                  # 格式坏了或轮数不对，重发几次
 
 
@@ -39,3 +46,8 @@ profile_max_chars:
   P3: 130
   P4: 280
   P5: 400
+
+price:                        # 美元 / 百万 token，deepseek-v4-flash 高峰价
+  input_cache_hit: 0.014
+  input_cache_miss: 0.44
+  output: 1.32
