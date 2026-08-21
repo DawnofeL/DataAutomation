@@ -46,8 +46,3 @@ profile_max_chars:
   P3: 130
   P4: 280
   P5: 400
-
-price:                        # 美元 / 百万 token，deepseek-v4-flash 高峰价
-  input_cache_hit: 0.014
-  input_cache_miss: 0.44
-  output: 1.32

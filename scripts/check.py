@@ -12,11 +12,8 @@ import re
 import statistics
 import sys
 from collections import Counter
-from pathlib import Path
 
-import yaml
-
-ROOT = Path(__file__).resolve().parent.parent
+from config import ROOT, load
 
 # ---------- 硬失败词表 ----------
 
@@ -89,10 +86,6 @@ PIVOT_SOFT = [r"我一直以为[^。！？]{1,40}(?:后来|才)",
 
 MODAL = "啊嘛呢咯"
 CV_FLOOR = 0.40
-
-
-def load_config():
-    return yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
 
 
 def han(s):
@@ -224,4 +217,4 @@ def check_all(cfg):
 
 
 if __name__ == "__main__":
-    sys.exit(1 if check_all(load_config()) else 0)
+    sys.exit(1 if check_all(load()) else 0)

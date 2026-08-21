@@ -6,7 +6,8 @@
     python scripts/run.py --plan     只打印预估，不发请求
     python scripts/run.py --preview  打印第一批拼出来的 system 和 user，不发请求
 
-这个文件不碰提示词也不碰 HTTP，全在 scripts/llm.py 里。
+这个文件不碰提示词也不碰 HTTP，那些在 scripts/llm.py 里；
+token 和花费在 scripts/usage.py 里。
 """
 
 import argparse
@@ -19,8 +20,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check as checker  # noqa: E402
+import config  # noqa: E402
 import llm  # noqa: E402
 import parse as parser_  # noqa: E402
+import usage as accounting  # noqa: E402
 
 
 def build_tasks(cfg):
@@ -30,7 +33,7 @@ def build_tasks(cfg):
     opinion 空着的文件整个跳过。
 
     Args:
-        cfg (dict): llm.load_config() 的返回值。
+        cfg (dict): config.load() 的返回值。
 
     Returns:
         tuple[list[dict], list[str]]: (任务列表, 跳过原因)。
@@ -70,10 +73,10 @@ def tag(task):
 
 
 def print_plan(cfg, tasks, skipped, system):
-    """跑之前把要花的钱和要产的量打出来。
+    """跑之前把这一趟的量和预估用量打出来。
 
     Args:
-        cfg (dict): llm.load_config() 的返回值。
+        cfg (dict): config.load() 的返回值。
         tasks (list[dict]): build_tasks() 的任务列表。
         skipped (list[str]): build_tasks() 的跳过原因。
         system (str): llm.build_system() 的结果。
@@ -96,19 +99,18 @@ def print_plan(cfg, tasks, skipped, system):
     n_dialogues = sum(len(t["points"]) for t in tasks)
     users = [llm.build_user(cfg, t["domain"], t["keyword"], t["opinion"], t["points"])
              for t in tasks]
-    usage = llm.estimate_usage(cfg, system, users, n_dialogues)
 
     print(f"\n{len(tasks)} 次调用  →  {n_dialogues} 段对话")
     print(f"参数 {cfg['model']}  {cfg['profile']}  {cfg['turns']} 轮  "
           f"思考{'开' if cfg['thinking'] else '关'}")
-    print(f"预估 {llm.format_usage(cfg, usage)}")
+    print(f"预估 {accounting.fmt(accounting.estimate(cfg, system, users, n_dialogues))}")
 
 
 def print_preview(cfg, tasks, system):
     """把第一批实际会发出去的 system 和 user 原样打出来。
 
     Args:
-        cfg (dict): llm.load_config() 的返回值。
+        cfg (dict): config.load() 的返回值。
         tasks (list[dict]): build_tasks() 的任务列表。
         system (str): llm.build_system() 的结果。
     """
@@ -125,22 +127,23 @@ def run_one(cfg, system, task):
     """跑一批：调模型，成功就把原文写进 output/raw/。
 
     Args:
-        cfg (dict): llm.load_config() 的返回值。
+        cfg (dict): config.load() 的返回值。
         system (str): llm.build_system() 的结果。
         task (dict): build_tasks() 里的一项。
 
     Returns:
-        tuple[dict, dict, str | None]: (任务, 用量, 错在哪)。成功时第三项是 None。
+        tuple[dict, list[dict], str | None]: (任务, 每次请求的官方 usage, 错在哪)。
+            成功时第三项是 None。
     """
-    text, usage, error = llm.generate(
+    text, usages, error = llm.generate(
         cfg, system, task["domain"], task["keyword"], task["opinion"], task["points"])
     if error:
-        return task, usage, error
+        return task, usages, error
 
     out = ROOT / cfg["output_dir"] / "raw" / f"{task['domain']}_{task['keyword']}_{task['batch']}.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
-    return task, usage, None
+    return task, usages, None
 
 
 def main():
@@ -151,7 +154,7 @@ def main():
     ap.add_argument("--preview", action="store_true", help="只打印拼好的 system 和 user")
     args = ap.parse_args()
 
-    cfg = llm.load_config()
+    cfg = config.load()
     if cfg["profile"] not in cfg["profiles"]:
         sys.exit(f"config.yaml 的 profile 是 {cfg['profile']}，profiles 里没有这一档")
     if not cfg.get("api_key"):
@@ -173,19 +176,19 @@ def main():
         return
 
     print()
-    total = llm.blank_usage()
-    fails = []
+    before = accounting.balance(cfg)
+    collected, fails = [], []
     with ThreadPoolExecutor(max_workers=cfg["concurrency"]) as pool:
         futures = [pool.submit(run_one, cfg, system, t) for t in tasks]
         for i, future in enumerate(as_completed(futures), 1):
-            task, usage, error = future.result()
-            for k in total:
-                total[k] += usage[k]
+            task, usages, error = future.result()
+            collected += usages
             print(f"  [{i}/{len(tasks)}] {tag(task):<28} {error or 'ok'}")
             if error:
                 fails.append(f"{tag(task)}: {error}")
 
-    print(f"\n实际 {llm.format_usage(cfg, total)}")
+    print(f"\n实际 {accounting.fmt(accounting.merge(collected))}")
+    print(f"余额 {accounting.fmt_balance(before, accounting.balance(cfg))}")
     if fails:
         print(f"\n{len(fails)} 批没跑成，raw 不完整：", file=sys.stderr)
         for f in fails:

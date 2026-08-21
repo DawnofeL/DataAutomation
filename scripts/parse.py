@@ -9,16 +9,10 @@
 import json
 import re
 import sys
-from pathlib import Path
 
-import yaml
+from config import ROOT, load
 
-ROOT = Path(__file__).resolve().parent.parent
 STRIP = re.compile(r"^\s*(?:[-*•]|\d+[.、)])\s*")
-
-
-def load_config():
-    return yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
 
 
 def load_points(cfg):
@@ -122,4 +116,4 @@ def parse_all(cfg):
 
 
 if __name__ == "__main__":
-    parse_all(load_config())
+    parse_all(load())

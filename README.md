@@ -5,13 +5,15 @@
 ```
 input/topics_*.json  →  run.py  →  output/dialogues_*.json
                           │
-                          ├── llm.py     拼 system 和 user，调 DeepSeek
+                          ├── llm.py     拼 system 和 user，调模型
                           ├── parse.py   模型吐的纯文本 → JSON
-                          └── check.py   质检
+                          ├── check.py   质检
+                          ├── usage.py   token 和余额
+                          └── config.py  读 config.yaml
 ```
 
-一条命令跑完。所有和大模型打交道的代码都在 `scripts/llm.py` 一个文件里，
-其他脚本不碰提示词也不碰 HTTP。
+一条命令跑完。提示词怎么拼、请求怎么发，全在 `scripts/llm.py` 一个文件里，
+那个文件只有这两件事，别的都不在里面。
 
 讨论点 JSON 由 topic-generation 那个独立 skill 产出，不在本仓库。
 
@@ -87,11 +89,6 @@ profiles:
   P5: "短句为底，其中一轮一口气讲了很多，300 字上下，其余仍然短"
 
 profile_max_chars: {P1: 40, P2: 100, P3: 130, P4: 280, P5: 400}
-
-price:
-  input_cache_hit: 0.014
-  input_cache_miss: 0.44
-  output: 1.32
 ```
 
 | 参数 | 是什么 | 调了会怎样 |
@@ -107,7 +104,6 @@ price:
 | `profile` | 这批对话的长度形状 | 换档，从全短到含大段 |
 | `turns` | 每段几轮。8 轮 = 16 条消息 | 对话变长，也更难凑满 |
 | `profile_max_chars` | 质检的单条字数上限 | 放宽或收紧判定 |
-| `price` | 美元 / 百万 token | 只影响屏幕上印的钱数 |
 
 ## `thinking` 和 `dialogue_gen_per_call`
 
@@ -144,6 +140,10 @@ P2 的一段 8 轮对话，assistant 各条实际字数可能是：
 
 按 keyword 切，一次调用只带一个话题，上下文干净。system 每次调用一字不差，
 第二次起走 DeepSeek 的 prompt cache，按 cache hit 计价，便宜 30 倍。
+
+token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，字段名照抄，
+`reasoning_tokens` 也在里面。花费不自己算，跑前跑后各查一次官方的
+`GET /user/balance`。DeepSeek 扣费有几分钟延迟，跑完那一刻两个余额常常一样。
 
 45 条讨论点、`dialogue_gen_per_call: 2`：
 
@@ -206,7 +206,7 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
 
 9 次调用  →  15 段对话
 参数 deepseek-v4-flash  P2  8 轮  思考开
-预估 输入 6.6 万（命中 4.4 万）  输出 0.4 万  $0.02
+预估 输入未命中 3.0 万  输入命中缓存 3.5 万  输出 0.4 万
 
 继续？[y/N] y
 
@@ -215,7 +215,8 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
   ...
   [9/9] 两性关系/彩礼 第1批                  ok
 
-实际 输入 13.1 万（命中 12.8 万）  输出 7.3 万  $0.10
+实际 输入未命中 0.1 万  输入命中缓存 7.7 万  输出 4.5 万  其中思考 3.9 万
+余额 97.31 → 97.31 CNY（扣费有延迟，两个数一样是正常的）
 
 1 批没跑成，raw 不完整：
   两性关系/约会 第1批: 2-1: 12 条消息，应为 16 条（8 轮）；2-2: 12 条消息，应为 16 条（8 轮）
@@ -232,8 +233,8 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
 ✓ output/dialogues_两性关系.json
 ```
 
-「预估」按 `price` 算，「实际」按接口返回的 `usage` 算。没跑成的批次 raw 不落盘，
-下次重跑只会重跑它们。
+「预估」按字符数拍，「实际」是官方 `usage` 的汇总。没跑成的批次 raw 不落盘，
+下次重跑只会重跑它们。单独查余额：`python scripts/usage.py`。
 
 ## 发出去的 system
 
@@ -391,9 +392,11 @@ DataAutomation/
 │
 ├── scripts/
 │   ├── run.py                    # 唯一入口：分批、并发、落盘、打印
-│   ├── llm.py                    # 上下文组装 + 推理，涉及大模型的代码全在这里
+│   ├── llm.py                    # 只有两件事：拼提示词、调模型
 │   ├── parse.py                  # 被 run.py 调用，也能单独重新解析已有 raw
-│   └── check.py                  # 被 run.py 调用，也能单独重查已有 json
+│   ├── check.py                  # 被 run.py 调用，也能单独重查已有 json
+│   ├── usage.py                  # 汇总官方 usage、查余额，也能单独查
+│   └── config.py                 # 读 config.yaml
 │
 └── output/
     ├── raw/                      # 解析成功后删
