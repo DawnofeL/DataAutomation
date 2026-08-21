@@ -303,7 +303,7 @@ DataAutomation/
 │   ├── alive-dialogue.md         # 活人感
 │   └── knowledge-honesty.md      # 涉及事实时的边界
 │
-├── scripts/                      # 待写
+├── scripts/
 │   ├── run.py                    # 唯一入口，一条命令跑完
 │   ├── parse.py                  # 被 run.py 调用，也能单独重新解析已有 raw
 │   └── check.py                  # 被 run.py 调用，也能单独重查已有 json
@@ -312,5 +312,3 @@ DataAutomation/
     ├── raw/                      # 解析成功后删
     └── dialogues_两性关系.json
 ```
-
-`scripts/` 下三个文件尚未实现。
