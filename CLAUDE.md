@@ -36,6 +36,6 @@ skill、提示词、宪法、领域文件，凡是会被模型读到的，只写
 
 ## 适用范围
 
-`data-generation/` 下所有文件。
+`prompts/`、`references/`、`personas/` 下所有文件。
 
 `README.md` 和本文件是写给人看的，不受此约束。
