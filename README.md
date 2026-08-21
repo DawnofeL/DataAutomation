@@ -8,12 +8,14 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
                           ├── llm.py     拼 system 和 user，调模型
                           ├── parse.py   模型吐的纯文本 → JSON
                           ├── check.py   质检
-                          ├── usage.py   token 和余额
-                          └── config.py  读 config.yaml
+                          ├── usage.py   数 token、查余额
+                          ├── config.py  读配置
+                          └── ui/        命令行长什么样
 ```
 
 一条命令跑完。提示词怎么拼、请求怎么发，全在 `scripts/llm.py` 一个文件里，
-那个文件只有这两件事，别的都不在里面。
+那个文件只有这两件事。命令行的排版和进度条全在 `scripts/ui/`，业务脚本不拼
+转义码、不数空格。
 
 讨论点 JSON 由 topic-generation 那个独立 skill 产出，不在本仓库。
 
@@ -63,12 +65,13 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
 
 ## api_key
 
-**不写进 `config.yaml`，这个仓库是公开的。** 两种放法，环境变量优先：
+三个地方都能放，后面的盖前面的：
 
-```bash
-cp secrets.example.yaml secrets.yaml   # 填 key，.gitignore 挡着，不进仓库
-export DEEPSEEK_API_KEY=sk-...         # 或者用环境变量
-```
+| 放哪 | 进不进仓库 |
+|---|---|
+| `config.yaml` 里 `api_key: sk-...` | 进 |
+| `secrets.yaml`（抄 `secrets.example.yaml`） | 不进，`.gitignore` 挡着 |
+| 环境变量 `DEEPSEEK_API_KEY` | 不进 |
 
 ## `config.yaml`
 
@@ -213,52 +216,109 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
 ## 命令
 
 ```bash
+pip install -r requirements.txt
+
 python scripts/run.py            打印预估，等确认后跑
 python scripts/run.py --yes      不问直接跑
-python scripts/run.py --plan     只打印预估，不发请求
-python scripts/run.py --preview  打印第一批拼好的 system 和 user，不发请求
+python scripts/run.py --plan     只打印预估和余额，不生成
+python scripts/run.py --preview  打印第一批拼好的 system 和 user，完全离线
+python scripts/parse.py          重新解析 output/raw/，不花钱
+python scripts/check.py          重查 output/dialogues_*.json，不花钱
+python scripts/usage.py          查一次余额
 ```
+
+`tokenizers` 用来真数 token，没装也能跑，token 数退化成按字数估。
 
 ## 屏幕上
 
-下面是记录下来的一次真实运行，当时 `dialogue_gen_per_call` 还是 2，所以是 9 次调用。
-
 ```
-两性关系  3 个关键词，15 条讨论点
-  彩礼           5 条讨论点  →  3 次调用
-  约会           5 条讨论点  →  3 次调用
-  生小孩          5 条讨论点  →  3 次调用
+  DataAutomation · 讨论点 → 多轮对话
 
-9 次调用  →  15 段对话
-参数 deepseek-v4-flash  P2  4-8 轮  思考关
-预估 输入未命中 3.1 万  输入命中缓存 3.5 万  输出 0.4 万
+  ┌─ 输入 ────────────────────────────────────────────────────────────────
+  │ 两性关系  3 个关键词 · 15 条讨论点
+  │   彩礼    5 条  →  2 批
+  │   约会    5 条  →  2 批
+  │   生小孩  5 条  →  2 批
+  └
 
-继续？[y/N] y
+  ┌─ 参数 ────────────────────────────────────────────────────────────────
+  │ 模型      deepseek-v4-flash  思考 关
+  │ 长度      P2  以短句为主，偶尔一条到 60 至 80 字，其余仍然短
+  │ 轮数      4 到 8 轮  由讨论点自己定，不硬凑
+  │ 并发      4 路  每批 4 段 · 不合格重发 2 次
+  └
 
-  [1/9] 两性关系/约会 第1批                  ok
-  [2/9] 两性关系/彩礼 第3批                  ok
-  ...
-  [9/9] 两性关系/生小孩 第1批                 ok
+  ┌─ 每次调用喂进去多少 token ────────────────────────────────────────────
+  │ system                6,449
+  │   骨架 system.md        455
+  │   人设                  232
+  │   用词                1,649
+  │   活人感              3,566
+  │   事实边界              550
+  │ user              432 - 468  随讨论点变
+  │ 单次合计              6,917  最大的一批
+  │
+  │ tokenizer/deepseek.json 真数的
+  └
 
-实际 输入未命中 0.4 万  输入命中缓存 6.2 万  输出 0.4 万
-余额 92.69 → 92.28 CNY（扣费有延迟，两个数一样是正常的）
+  ┌─ 预估  6 次调用 → 15 段对话 ──────────────────────────────────────────
+  │ 输入未命中    28,495
+  │ 输入命中缓存  12,898
+  │ 输出           4,000
+  │
+  │ 输入真数，输出按每条 25 字拍
+  │ 余额        97.31 CNY
+  └
 
-解析 15 段  →  dialogues_两性关系.json
+  继续？[y/N] y
 
-质检 15 段对话
-  硬失败 11
-    [dialogues_两性关系] 彩礼/1-3 第6条  提示性冒号
-    [dialogues_两性关系] 生小孩/3-3 第2条  问句结尾
-    ...
-  警告 9
-    [dialogues_两性关系] 彩礼/1-2  各条长度太齐，变异系数 0.14
-    ...
+  生成  ████████████████████████████  6/6   ✓ 生小孩 第2批
 
-✓ output/dialogues_两性关系.json
+  ┌─ 实际 ────────────────────────────────────────────────────────────────
+  │ 输入未命中     3,500
+  │ 输入命中缓存  44,800
+  │ 输出           3,360
+  │
+  │ 余额        97.31 → 96.85 CNY（扣费有延迟，两个数一样是正常的）
+  └
+
+  ┌─ 解析 ────────────────────────────────────────────────────────────────
+  │ dialogues_两性关系.json  15 段  4 轮 2 段 · 5 轮 4 段 · 7 轮 4 段 · 8 轮 5 段
+  └
+
+  ┌─ 质检 ────────────────────────────────────────────────────────────────
+  │ 15 段对话    ✓ 全过    1 条警告
+  │
+  │ 警告  人判断，不拦
+  │   [dialogues_两性关系] 跨对话开场撞车：3 段以「我男朋友」开头
+  │
+  │ 硬失败为 0，这批可以进训练集
+  └
+
+  ┌─ 落盘 ────────────────────────────────────────────────────────────────
+  │ ✓ output/dialogues_两性关系.json
+  └
 ```
 
-「预估」按字符数拍，「实际」是官方 `usage` 的汇总。没跑成的批次 raw 不落盘，
-下次重跑只会重跑它们。单独查余额：`python scripts/usage.py`。
+生成那一行是原地刷新的进度条，重定向到文件时自动退化成一批一行。
+所有对齐按显示宽度算，一个汉字两格，中英文混排不会歪。
+
+## token 都花在哪
+
+`system` 每批一字不差，第二次调用起走缓存。它那六千多 token 的构成：
+
+| 块 | token | 来源 |
+|---|---|---|
+| 骨架 | 455 | `prompts/system.md` 去掉四个占位符剩下的：任务说明、衔接、硬禁令速查、交稿前自查 |
+| 人设 | 232 | `personas/default.md` |
+| 用词 | 1,649 | `references/words.md` |
+| 活人感 | 3,566 | `references/alive-dialogue.md` |
+| 事实边界 | 550 | `references/knowledge-honesty.md` |
+| **合计** | **6,449** | |
+
+数字是 `tokenizer/deepseek.json` 真跑一遍分词出来的，不是按字数估的。
+这份 tokenizer 是 DeepSeek-V3 的官方词表，仓库里带着，不联网。
+它数的是纯文本，接口返回的 `prompt_tokens` 还要加上几个 chat 模板的固定 token。
 
 ## 发出去的 system
 
@@ -410,12 +470,14 @@ DataAutomation/
 │
 ├── config.yaml
 ├── secrets.example.yaml          # 抄成 secrets.yaml 填 api_key，后者不进仓库
+├── requirements.txt
 │
 ├── input/                        # 讨论点 JSON
 │   └── topics_两性关系.json
 │
 ├── prompts/                      # 所有提示词，py 里一个字都没有
-│   ├── system.md                 # 占位符 {persona} {words} {alive_dialogue} {knowledge_honesty}
+│   ├── system.md                 # 任务说明 + 四个占位符 + 硬禁令速查 + 交稿前自查
+│   │                             #        {persona} {words} {alive_dialogue} {knowledge_honesty}
 │   ├── user.md                   # 占位符 {domain} {keyword} {opinion} {n} {points}
 │   │                             #        {first_id} {min_turns} {max_turns} {answer_length}
 │   └── retry.md                  # 占位符 {problems} {min_turns} {max_turns}
@@ -428,13 +490,20 @@ DataAutomation/
 │   ├── alive-dialogue.md         # 活人感
 │   └── knowledge-honesty.md      # 涉及事实时的边界
 │
+├── tokenizer/
+│   └── deepseek.json             # DeepSeek-V3 官方词表，本地数 token 用
+│
 ├── scripts/
 │   ├── run.py                    # 唯一入口：分批、并发、落盘、打印
 │   ├── llm.py                    # 只有两件事：拼提示词、调模型
 │   ├── parse.py                  # 被 run.py 调用，也能单独重新解析已有 raw
 │   ├── check.py                  # 被 run.py 调用，也能单独重查已有 json
-│   ├── usage.py                  # 汇总官方 usage、查余额，也能单独查
-│   └── config.py                 # 读 config.yaml
+│   ├── usage.py                  # 数 token、汇总官方 usage、查余额
+│   ├── config.py                 # 读 config.yaml + secrets.yaml + 环境变量
+│   └── ui/                       # 命令行长什么样，全在这个包里
+│       ├── theme.py              # 宽度、线条、颜色
+│       ├── blocks.py             # 面板、键值行、表格、按显示宽度对齐
+│       └── progress.py           # 进度条
 │
 └── output/
     ├── raw/                      # 解析成功后删

@@ -68,6 +68,14 @@ REFERENCES = {
     "{knowledge_honesty}": "knowledge-honesty.md",
 }
 
+# 占位符对应的中文名，统计 token 时打给人看。
+LABELS = {
+    "{persona}": "人设",
+    "{words}": "用词",
+    "{alive_dialogue}": "活人感",
+    "{knowledge_honesty}": "事实边界",
+}
+
 
 # ====================================================================
 #  提示词拼装
@@ -105,6 +113,21 @@ def _fill(name, slots):
     return text
 
 
+def system_slots(cfg):
+    """读出要填进 system.md 的四份文本，按拼装顺序。
+
+    Args:
+        cfg (dict): config.yaml 的内容。用到 persona。
+
+    Returns:
+        dict[str, str]: {占位符: 文本}，顺序就是它们在 system.md 里出现的顺序。
+    """
+    slots = {"{persona}": (ROOT / cfg["persona"]).read_text(encoding="utf-8").strip()}
+    for key, filename in REFERENCES.items():
+        slots[key] = (ROOT / "references" / filename).read_text(encoding="utf-8").strip()
+    return slots
+
+
 def build_system(cfg):
     """拼 system 消息：骨架 prompts/system.md + 人设 + 三份 references。
 
@@ -116,10 +139,24 @@ def build_system(cfg):
     Returns:
         str: 完整的 system 消息。
     """
-    slots = {"{persona}": (ROOT / cfg["persona"]).read_text(encoding="utf-8").strip()}
-    for key, filename in REFERENCES.items():
-        slots[key] = (ROOT / "references" / filename).read_text(encoding="utf-8").strip()
-    return _fill("system.md", slots)
+    return _fill("system.md", system_slots(cfg))
+
+
+def system_parts(cfg):
+    """system 消息拆成几块，用来统计每块占多少 token。
+
+    骨架那一块是 system.md 把四个占位符全填空串之后剩下的内容，也就是
+    任务说明、段落之间的衔接、硬禁令速查和交稿前自查。
+
+    Args:
+        cfg (dict): config.yaml 的内容。
+
+    Returns:
+        list[tuple[str, str]]: [(块名, 文本), ...]，顺序就是拼装顺序。
+    """
+    slots = system_slots(cfg)
+    skeleton = _fill("system.md", {k: "" for k in slots})
+    return [("骨架 system.md", skeleton)] + [(LABELS[k], v) for k, v in slots.items()]
 
 
 def build_user(cfg, domain, keyword, opinion, points):
@@ -231,8 +268,8 @@ def find_problems(cfg, text, points):
     用的就是 parse.py 那套解析和校验，标准跟落盘时一模一样。这样报 ok 的批次
     parse.py 一定收得下，不会出现「跑完说成功、解析时全灭」。
 
-    查三件事：讨论点有没有漏、有没有多、每段轮数落没落在
-    [min_turns, max_turns] 区间里、角色顺序对不对。
+    查四件事：讨论点有没有漏、有没有多、有没有重复、每段轮数落没落在
+    [min_turns, max_turns] 区间里且角色严格交替。
     内容写得好不好一概不管，那是 check.py 的事。
 
     Args:
@@ -246,6 +283,9 @@ def find_problems(cfg, text, points):
     want = {p["id"] for p in points}
     problems, seen = [], set()
     for did, messages in parse.parse_raw(text):
+        if did in seen:
+            problems.append(f"{did} 写了两遍，只留一段")
+            continue
         seen.add(did)
         if did not in want:
             problems.append(f"{did} 不属于这一批，删掉")

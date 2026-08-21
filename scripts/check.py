@@ -13,6 +13,7 @@ import statistics
 import sys
 from collections import Counter
 
+import ui
 from config import ROOT, load
 
 # ---------- 硬失败词表 ----------
@@ -190,30 +191,54 @@ def check_file(path, cfg):
 
 
 def check_all(cfg):
+    """质检 output/ 下所有 dialogues_*.json，把结果印出来。
+
+    Args:
+        cfg (dict): config.load() 的返回值。
+
+    Returns:
+        int: 硬失败条数。0 表示这批数据可以用。
+    """
     paths = sorted((ROOT / cfg["output_dir"]).glob("dialogues_*.json"))
     if not paths:
-        print("没有可检查的 dialogues_*.json", file=sys.stderr)
+        ui.panel(ui.warn("质检"), ["output/ 下没有 dialogues_*.json"])
         return 0
 
     all_hard, all_warn, total = [], [], 0
-    for p in paths:
-        n, hard, warn = check_file(p, cfg)
+    for path in paths:
+        n, hard, warn = check_file(path, cfg)
         total += n
-        all_hard += [f"[{p.stem}] {x}" for x in hard]
-        all_warn += [f"[{p.stem}] {x}" for x in warn]
+        all_hard += [f"[{path.stem}] {x}" for x in hard]
+        all_warn += [f"[{path.stem}] {x}" for x in warn]
 
-    print(f"质检 {total} 段对话")
-    print(f"  硬失败 {len(all_hard)}")
-    for x in all_hard[:40]:
-        print(f"    {x}")
-    if len(all_hard) > 40:
-        print(f"    ... 另有 {len(all_hard)-40} 条")
-    print(f"  警告 {len(all_warn)}")
-    for x in all_warn[:20]:
-        print(f"    {x}")
-    if len(all_warn) > 20:
-        print(f"    ... 另有 {len(all_warn)-20} 条")
+    verdict = ui.ok(f"{ui.OK} 全过") if not all_hard else ui.bad(f"{ui.BAD} {len(all_hard)} 条硬失败")
+    rows = [f"{total} 段对话    {verdict}    {ui.warn(str(len(all_warn)) + ' 条警告')}"]
+
+    if all_hard:
+        rows += ["", ui.bad("硬失败")] + _clip(all_hard, 25)
+    if all_warn:
+        rows += ["", ui.warn("警告  人判断，不拦")] + _clip(all_warn, 12)
+    if not all_hard:
+        rows += ["", ui.dim("硬失败为 0，这批可以进训练集")]
+
+    ui.panel("质检", rows)
     return len(all_hard)
+
+
+def _clip(items, limit):
+    """列表太长就截断，末尾补一句还剩多少条。
+
+    Args:
+        items (list[str]): 原始列表。
+        limit (int): 最多显示几条。
+
+    Returns:
+        list[str]: 显示用的行。
+    """
+    shown = ["  " + x for x in items[:limit]]
+    if len(items) > limit:
+        shown.append(ui.dim(f"  另有 {len(items) - limit} 条"))
+    return shown
 
 
 if __name__ == "__main__":

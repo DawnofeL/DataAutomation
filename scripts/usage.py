@@ -6,7 +6,8 @@
     每次请求的用量   响应体里的 usage 对象，字段原样收下，一个都不挑
     账户余额         GET /user/balance
 
-唯一自己估的是开跑前的预估，那时候还没请求可查，只能按字符数拍。
+跑之前还没有请求可查，输入部分用 tokenizer/deepseek.json 真数一遍，
+输出部分只能按字数拍。
 
 不在这里换算成钱：DeepSeek 扣费有延迟，一趟跑完余额通常纹丝不动，过一阵才扣。
 所以余额只跑前跑后各打一次给你看，不拿差值当这一趟的花费。要精确对账去
@@ -23,11 +24,17 @@ from decimal import Decimal
 
 import config
 
-# 中文粗估：1 个 token 约 1.5 个字符。只用于开跑前预估。
+# 官方 tokenizer，仓库里带着，不联网。
+TOKENIZER = config.ROOT / "tokenizer" / "deepseek.json"
+
+# tokenizers 装不上时退回按字符估：1 个 token 约 1.5 个中文字符。
 CHARS_PER_TOKEN = 1.5
 
-# 模型每条消息平均多少字。只用于开跑前预估输出量。
+# 模型每条消息平均多少字。对话还没生成，输出量只能这么拍。
 CHARS_PER_MESSAGE = 25
+
+# Tokenizer 实例只建一次，建好了放这儿。
+_TOKENIZER = None
 
 # 打印时按这个顺序取 usage 里的字段，取不到就不印。
 # 名字全部照抄 DeepSeek 响应体，不重命名。
@@ -37,6 +44,59 @@ SHOWN = [
     ("completion_tokens", "输出"),
     ("reasoning_tokens", "其中思考"),
 ]
+
+
+# ====================================================================
+#  数 token
+# ====================================================================
+
+
+def _tokenizer():
+    """建好的 Tokenizer，或者 None。
+
+    tokenizers 没装、或者 tokenizer/deepseek.json 不在，都返回 None，
+    调用方退回按字符估。缺个 token 计数不该让整条流水线跑不起来。
+
+    Returns:
+        object | None: tokenizers.Tokenizer 实例。
+    """
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        try:
+            from tokenizers import Tokenizer
+
+            _TOKENIZER = Tokenizer.from_file(str(TOKENIZER))
+        except Exception:
+            _TOKENIZER = False
+    return _TOKENIZER or None
+
+
+def exact():
+    """token 数是真数出来的还是估出来的。
+
+    Returns:
+        bool: 真数返回 True。
+    """
+    return _tokenizer() is not None
+
+
+def count(text):
+    """一段文本多少 token。
+
+    有 tokenizer 就真跑一遍分词，没有就按字符数除以 CHARS_PER_TOKEN 估。
+    数出来的是纯文本的 token 数，不含 chat 模板那几个固定 token，所以会比
+    接口返回的 prompt_tokens 略少几个。
+
+    Args:
+        text (str): 任意文本。
+
+    Returns:
+        int: token 数。
+    """
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        return int(len(text) / CHARS_PER_TOKEN)
+    return len(tokenizer.encode(text, add_special_tokens=False).ids)
 
 
 # ====================================================================
@@ -83,6 +143,18 @@ def fmt(total):
     return "  ".join(parts) if parts else "无"
 
 
+def rows(total):
+    """汇总后的用量拆成表格行，给 ui.table() 用。
+
+    Args:
+        total (dict[str, int]): merge() 的返回值，或者形状相同的预估。
+
+    Returns:
+        list[list[str]]: [[名目, 数值], ...]，值为 0 的项不出现。
+    """
+    return [[label, f"{total[key]:,}"] for key, label in SHOWN if total.get(key)]
+
+
 # ====================================================================
 #  开跑前的预估
 # ====================================================================
@@ -90,6 +162,8 @@ def fmt(total):
 
 def estimate(cfg, system, users, n_dialogues):
     """开跑前拍一个用量，字段名和官方 usage 对齐，能直接喂给 fmt()。
+
+    输入是现成的文本，用 tokenizer 真数。输出还不存在，只能按每条消息多少字拍。
 
     system 每次调用一字不差，只有最先发出去的那几路会 cache miss，后面都命中。
     并发几路就按几路 miss 算。输出按 max_turns 算，都往贵了估。
@@ -103,13 +177,13 @@ def estimate(cfg, system, users, n_dialogues):
     Returns:
         dict[str, int]: 字段名照抄官方 usage。
     """
-    system_tokens = len(system) / CHARS_PER_TOKEN
+    system_tokens = count(system)
     miss_calls = min(cfg["concurrency"], len(users))
     return {
-        "prompt_cache_miss_tokens": int(
-            system_tokens * miss_calls + sum(len(u) for u in users) / CHARS_PER_TOKEN
+        "prompt_cache_miss_tokens": (
+            system_tokens * miss_calls + sum(count(u) for u in users)
         ),
-        "prompt_cache_hit_tokens": int(system_tokens * max(0, len(users) - miss_calls)),
+        "prompt_cache_hit_tokens": system_tokens * max(0, len(users) - miss_calls),
         "completion_tokens": int(
             n_dialogues * cfg["max_turns"] * 2 * CHARS_PER_MESSAGE / CHARS_PER_TOKEN
         ),
