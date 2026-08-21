@@ -74,7 +74,7 @@ model: deepseek-v4-flash
 thinking: false
 timeout: 600
 
-dialogue_gen_per_call: 2
+dialogue_gen_per_call: 4
 concurrency: 4
 max_retry: 2
 
@@ -99,7 +99,7 @@ profile_max_chars: {P1: 40, P2: 100, P3: 130, P4: 280, P5: 400}
 | `model` | `deepseek-v4-flash` / `deepseek-v4-pro` | pro 贵三倍 |
 | `thinking` | 开不开思考 | 开着输出 token 多十倍，轮数更稳。v4-flash 默认是开，这里默认关 |
 | `timeout` | 单次请求超时，秒 | 思考开着一次要一两分钟，别设太短 |
-| `dialogue_gen_per_call` | 每次调用产出几段对话 | 见下 |
+| `dialogue_gen_per_call` | 每次调用产出几段对话 | 调用次数变少，单次输出变长，靠后几段容易变短变糊。重发时整批重来，一批越大重发越贵 |
 | `concurrency` | 同时开几路 | 跑得快，容易撞限流 |
 | `max_retry` | 格式坏了重发几次 | 重发一次的钱等于跑一次 |
 | `profile` | 这批对话的长度形状 | 换档，从全短到含大段 |
@@ -155,14 +155,17 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
 `reasoning_tokens` 也在里面。花费不自己算，跑前跑后各查一次官方的
 `GET /user/balance`。DeepSeek 扣费有几分钟延迟，跑完那一刻两个余额常常一样。
 
-45 条讨论点、`dialogue_gen_per_call: 2`：
+45 条讨论点、`dialogue_gen_per_call: 4`：
 
 | keyword | 讨论点 | 调用 |
 |---|---|---|
-| 彩礼 | 15 | 8 |
-| 约会 | 15 | 8 |
-| 生小孩 | 15 | 8 |
-| | | **24 次调用，45 段对话** |
+| 彩礼 | 15 | 4 |
+| 约会 | 15 | 4 |
+| 生小孩 | 15 | 4 |
+| | | **12 次调用，45 段对话** |
+
+调用次数本身不收费，DeepSeek 只按 token 计价。多切一刀的代价是 system 多发一遍，
+但那部分走 cache hit，一万字的 system 命中缓存约 7000 token，一次不到 0.001 元。
 
 ---
 
@@ -210,6 +213,8 @@ python scripts/run.py --preview  打印第一批拼好的 system 和 user，不�
 ```
 
 ## 屏幕上
+
+下面是记录下来的一次真实运行，当时 `dialogue_gen_per_call` 还是 2，所以是 9 次调用。
 
 ```
 两性关系  3 个关键词，15 条讨论点
