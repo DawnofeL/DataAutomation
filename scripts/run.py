@@ -210,7 +210,10 @@ def run_one(cfg, system, task):
 
 
 def generate_all(cfg, system, tasks):
-    """并发跑完所有批次，一条进度条盯着。
+    """并发跑完所有批次，屏幕底部两行常驻：进度条 + 累计用量。
+
+    每收到一批就把它的官方 usage 累加进去重画，跑的过程中随时能看到已经
+    烧了多少 token，不用等跑完。
 
     Args:
         cfg (dict): config.load() 的返回值。
@@ -222,18 +225,62 @@ def generate_all(cfg, system, tasks):
             失败清单每项是 (批次名, 错在哪)。
     """
     print()
-    bar = ui.Bar(len(tasks), "生成")
-    collected, fails = [], []
+    live = ui.Live(2)
+    collected, fails, retries = [], [], 0
+    done = 0
+
+    live.update([_line_progress(0, len(tasks), 0, "等第一批返回"),
+                 _line_usage(collected, 0)])
+
     with ThreadPoolExecutor(max_workers=cfg["concurrency"]) as pool:
         futures = [pool.submit(run_one, cfg, system, t) for t in tasks]
         for future in as_completed(futures):
             task, usages, error = future.result()
             collected += usages
-            bar.step(tag(task), failed=bool(error))
+            retries += max(0, len(usages) - 1)
+            done += 1
             if error:
                 fails.append((tag(task), error))
-    bar.close()
+            live.update([_line_progress(done, len(tasks), len(fails), tag(task), error),
+                         _line_usage(collected, retries)])
+
+    live.close()
     return collected, fails
+
+
+def _line_progress(done, total, n_fail, note, error=None):
+    """常驻区第一行：进度条 + 计数 + 刚跑完的那一批。
+
+    Args:
+        done (int): 已完成批数。
+        total (int): 总批数。
+        n_fail (int): 到目前为止失败几批。
+        note (str): 刚跑完的批次名，或者一句等待提示。
+        error (str | None): 这一批的错，有就标红。
+
+    Returns:
+        str: 排好的一行。
+    """
+    mark = ui.bad(ui.BAD) if error else ui.ok(ui.OK)
+    tail = f"{mark} {note}" if done else ui.dim(note)
+    fail_note = ui.bad(f"  失败 {n_fail}") if n_fail else ""
+    return (f"生成  {ui.bar(done, total)}  "
+            f"{ui.pad(f'{done}/{total}', 7)}{tail}{fail_note}")
+
+
+def _line_usage(collected, retries):
+    """常驻区第二行：到目前为止烧掉的 token。
+
+    Args:
+        collected (list[dict]): 已经收到的官方 usage。
+        retries (int): 到目前为止重发了几次。
+
+    Returns:
+        str: 排好的一行。
+    """
+    body = accounting.line(accounting.merge(collected))
+    tail = ui.warn(f"  重发 {retries}") if retries else ""
+    return f"{ui.dim('用量')}  {body}{tail}"
 
 
 def panel_result(cfg, collected, fails, before):

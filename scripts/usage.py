@@ -143,6 +143,25 @@ def fmt(total):
     return "  ".join(parts) if parts else "无"
 
 
+def line(total):
+    """把用量压成一行，给屏幕底部常驻那块用。
+
+    数值对齐到固定宽度，跑的时候数字在长大，位置不会左右跳。
+
+    Args:
+        total (dict[str, int]): merge() 的返回值。
+
+    Returns:
+        str: 形如「输入 20,700  命中 19,200  输出 1,440」。
+    """
+    return "  ".join(
+        f"{label} {total.get(key, 0):>7,}"
+        for key, label in [("prompt_cache_miss_tokens", "输入未命中"),
+                           ("prompt_cache_hit_tokens", "命中缓存"),
+                           ("completion_tokens", "输出")]
+    )
+
+
 def rows(total):
     """汇总后的用量拆成表格行，给 ui.table() 用。
 
