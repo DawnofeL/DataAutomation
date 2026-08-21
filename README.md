@@ -513,3 +513,160 @@ DataAutomation/
     ├── raw/                      # 解析成功后删
     └── dialogues_两性关系.json
 ```
+
+---
+
+# 文件介绍
+
+按下面的顺序从上往下读一遍，就知道每个文件干什么。
+每一条只用到前面已经出现过的东西。
+
+跑起来只要两个第三方包，都在 `requirements.txt` 里：`PyYAML` 读配置，
+`tokenizers` 数 token。后者没装也能跑，token 数退化成按字数估。
+
+代码的阅读顺序和运行顺序有一处不同：`parse.py` 排在 `llm.py` 前面。因为 `llm.py` 判断模型输出合不合格，用的就是 `parse.py` 那套解析和校验，先看 `parse.py` 才看得懂 `llm.py` 的重发条件。
+
+---
+
+### S1 输入与素材
+
+这一节全是数据文件，一行代码都没有。模型最终读到的每一个字都出自这里。
+
+`input/topics_<domain>.json` 是整条流水线的入口，结构三层：
+
+```json
+{
+  "domain": "两性关系",
+  "opinion": "男女平等，有话直说好过猜，别把每件小事都上升成不爱了",
+  "topics": [
+    {"id": 1, "keyword": "彩礼", "discussions": [
+      {"id": "1-1", "point": "结婚要不要给彩礼，给多少算合适"}
+    ]}
+  ]
+}
+```
+
+`opinion` 是 assistant 在这个领域的立场，一个文件写一次，底下所有 keyword 共用。一条 `discussion` 产一段对话。这个文件由 topic-generation 那个独立 skill 产出，不在本仓库。
+
+按序读八个文件：
+
+1. `config.yaml`：所有参数。分五块：路径、接口（`api_key`、`base_url`、`model`、`thinking`、`timeout`）、调用（`dialogue_gen_per_call` 每批几段、`concurrency` 并发几路、`max_retry` 重发几次）、形状（`profile` 用哪档长度、`min_turns` 到 `max_turns` 轮数区间）、以及 `profiles` 五档长度形状的原文和 `profile_max_chars` 质检的单条字数上限。
+
+   `profiles` 里那五句话原样填进提示词。模型数不清字数，所以长度给的是一句形状描述：
+
+   ```yaml
+   P2: "以短句为主，偶尔一条到 60 至 80 字，其余仍然短"
+   ```
+
+   每档末尾都有「其余仍然短」，防止模型把整段拉成一样长。
+
+2. `personas/default.md`：assistant 演的是谁。八段，每段一件事：定位成朋友、有看法但说完就停不说教、不会的直接说不会、会走神会跑题、有情绪、对方难受时先接住、不主动追问收尾。不写长度，长度归 `user.md` 的 `{answer_length}` 管，两处都写会打架。
+
+3. `references/words.md`：用词红线。四部分，前三部分命中即不合格：禁词（网络烂梗、过度夸张、虚假共鸣、口语糟粕、拟声词、后缀句式、收尾套话）、企业黑话（绝对禁用 27 个 + 看语境 14 个）、AI 句式（翻案腔、名词化、模型路标、硬停词、抒情词、三连排比、标点）。第四部分是可选词库，其中「语气词每条最多一个」和「同句不许两次挺X的」两条密度限制是硬的。
+
+4. `references/alive-dialogue.md`：活人感，全篇最长的一份。六节：消息长度要拉开差距、对话怎么推进（user 说话的三个来源、钩子要点名具体事物、首轮接球、user 中间轮不许纯捧哏）、话怎么说（回答前有停顿、说完附一句感受、把自己放进去、说完就停）、情绪场景、不许出现的说法（问句结尾、因果解释收尾、旁白腔、空洞接球、文案空话、类比后升华、收尾重复自己）、不知道的时候怎么退场。
+
+5. `references/knowledge-honesty.md`：事实边界。开头就写明「对话里出现可查证的说法时执行这一节」，是有条件触发的。三条硬规则（不确定不写成确定、专有名词要么写对要么绕开、不许倒推因果）、三档说法、用户说的事不许扩写、争议内容不许当定论。
+
+6. `prompts/system.md`：system 的骨架。开头一段任务说明讲清三件事：写多轮对话、user 和 assistant 两边都由模型写、下一条消息管具体参数。再一句挡跑偏的，说后面几节的例子只示范怎么说话，题材跟要写的内容无关。然后四个占位符 `{persona}` `{words}` `{alive_dialogue}` `{knowledge_honesty}` 按顺序把上面四份填进来。最后两张清单：硬禁令速查 12 条，交稿前自查 5 条。
+
+   四份 reference 各自的内部标题都比文件标题低一级，所以拼完整条 system 只有六个顶层小节，每份的子标题都收在自己那节底下。
+
+7. `prompts/user.md`：user 的骨架，九个占位符 `{domain}` `{keyword}` `{opinion}` `{n}` `{points}` `{first_id}` `{min_turns}` `{max_turns}` `{answer_length}`。内容顺序是：这一批哪些讨论点 → 讨论点只交代这段聊什么，user 的第一句台词由模型自己编 → 轮数区间和四条注水禁令 → 长度形状 → 输出格式。
+
+   输出格式这段是整条流水线的契约：
+
+   ```text
+   === 1-1
+   U 用户说的话
+   A 你回的话
+   ```
+
+   `{first_id}` 填的是这一批第一条讨论点的真实编号。写死成「`=== 讨论点id`」时模型会照抄成「`=== 讨论点 3-1`」，整批解析失败。
+
+8. `prompts/retry.md`：输出不合格时追加在 user 末尾的那段，两个占位符 `{problems}` 毛病清单和 `{min_turns}` `{max_turns}` 轮数区间。
+
+---
+
+### S2 底件
+
+主线三个文件都依赖的东西：读配置、命令行排版、数 token。
+
+按序读五个文件：
+
+9. `scripts/config.py`：一个 `load()`。三层叠加，后面盖前面：`config.yaml` 读全部参数，`secrets.yaml` 存在就叠上去（`.gitignore` 挡着不进仓库），环境变量 `DEEPSEEK_API_KEY` 优先级最高。`llm.py` 不读配置，`cfg` 一律由调用方传进去。
+
+    仓库里给了一份 `secrets.example.yaml`，抄一份改名成 `secrets.yaml` 填进自己的 key 即可。
+
+10. `scripts/ui/theme.py`：宽度 72 格、缩进两格、框线和方块字符、状态标记 `✓ ✗`、七个色号。`color_on()` 决定要不要上色：设了 `NO_COLOR` 不上、输出重定向到文件时不上（日志里不该有转义码）、Windows 上先用 ctypes 开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，开不了就当没有颜色。不上色时 `CODES` 里全是空串，调用处不用写 if。
+
+11. `scripts/ui/blocks.py`：静态排版。核心是 `width()`。一个汉字在等宽终端里占两格，用 `len()` 对齐中文会歪，所以宽度按 `unicodedata.east_asian_width` 算，顺带把 ANSI 转义码剥掉不计宽。`pad()` 按显示宽度补齐，`table()` 先量每列最宽再对齐，`panel()` 画一个上边框带标题、下边框只有一个角的框，`kv()` 排「标签 值 灰色备注」一行。
+
+12. `scripts/ui/progress.py`：动态那部分。`bar()` 是纯函数，只画方块串。`Live` 占住屏幕底部固定几行，每次 `update()` 先把光标上移 `height` 行再整块重画，所以跑的时候屏幕不往下滚。非终端时退化成一步一行，只留第一行，并且剥掉转义码。
+
+13. `scripts/usage.py`：token 和钱，两条原则：每次请求的用量一律用响应体里官方的 `usage` 对象，账户余额一律查官方 `GET /user/balance`。本地不维护价目表。
+
+    - `count()` 用 `tokenizer/deepseek.json` 真跑一遍分词。`tokenizers` 没装或词表文件不在，就退回按字符数除以 1.5 估，`exact()` 告诉调用方现在是哪种，屏幕上会写明。数出来的是纯文本 token，不含 chat 模板那几个固定 token，所以比接口返回的 `prompt_tokens` 略少几个。
+    - `merge()` 把若干次响应的 `usage` 加成一个。不挑字段，数值型的逐项相加，嵌套的 `prompt_tokens_details` 和 `completion_tokens_details` 摊平到顶层。`reasoning_tokens` 就是从这里来的，思考开着时它占输出的大头，手挑字段会漏掉它。
+    - `estimate()` 跑之前拍一份用量。输入是现成文本，真数；输出还不存在，按每条消息 25 字拍。system 每次调用一字不差，只有最先发出去的那几路 cache miss，所以按 `concurrency` 路算 miss、其余算命中。
+    - `fmt()` `line()` `rows()` 三种排法：面板里的多行、屏幕底部常驻的一行、表格行。
+    - `balance()` 查余额，任何异常都返回 `None`，查不到余额不该让整趟跑挂掉。`fmt_balance()` 把跑前跑后两个数排成一行，并注明两个数一样是正常的，DeepSeek 扣费有几分钟延迟。
+
+---
+
+### S3 主线
+
+解析、拼提示词调模型、质检。三个文件都能单独跑，不依赖 `run.py`。
+
+14. `scripts/parse.py`：把模型吐的纯文本变成 JSON，同时提供整条流水线唯一的一套结构校验。
+
+    - `parse_raw()` 按 `===` 切段，读 `U ` / `A ` 前缀定角色。两处容错：行首的列表符号和序号先用 `STRIP` 剥掉；模型手滑把一条消息断成两行时，没有前缀的那行接到上一条后面，不新起一条。
+    - `validate()` 三件事：消息数是偶数（最后一条必须是 A）、轮数落在 `[min_turns, max_turns]` 区间里、角色严格交替且没有空消息。
+    - `load_points()` 从 `input/` 建一张 `{领域: {讨论点id: (关键词, 讨论点原文)}}` 的表，落盘时把讨论点原文写回每段对话，方便日后追溯。
+    - `parse_all()` 扫 `output/raw/*.txt` 全部解析。文件名是 `{domain}_{keyword}_{batch}.txt`，从右边切两刀取领域名，这样领域名自己带下划线也不会切错。任何一段校验不过就整趟不落盘、raw 全部保留，改完重跑；全部通过才写 `dialogues_<domain>.json` 并删掉 raw。
+
+      输出 JSON 顶层记 `persona` `domain` `profile` `min_turns` `max_turns`，每段自己的 `turns` 逐条记，因为轮数每段都不一样。
+
+15. `scripts/llm.py`：拼提示词 + 调模型。这个文件不读配置、不数 token、不落盘。
+
+    - `_fill()` 读 `prompts/` 下的骨架换占位符。用 `str.replace` 不用 `str.format`，因为 references 里有 JSON 示例自带大括号，走 format 会被当占位符炸掉。换之前先核对骨架里的占位符和传进来的键完全一致，多一个少一个都当场报错。宁可炸，也别拿一段带着 `{keyword}` 的提示词去调模型。
+    - `build_system()` 拼 system，结果跟具体讨论点无关，开跑前拼一次就够。`system_parts()` 把它拆成骨架和四份 reference，供屏幕上统计每块占多少 token；骨架那块是把四个占位符全填空串之后剩下的内容。
+    - `build_user()` 拼这一批的 user，`build_retry()` 拼重发时追加的那段。
+    - `chat()` 发一次请求。直接打 `urllib`，不用 openai SDK，发出去的每个字段都在 `payload` 那八行里明文摆着。`thinking` 是 DeepSeek v4 的开关，v4-flash 默认开思考。四类异常全部包成 `RuntimeError` 带上人能读的原因。
+    - `find_problems()` 判这次输出合不合格，用的就是上面 `parse.parse_raw` 和 `parse.validate`。标准跟落盘时一模一样，所以报 ok 的批次 `parse.py` 一定收得下，不会出现「跑完说成功、解析时全灭」。查四件事：讨论点漏没漏、有没有多出不属于这批的、有没有同一条写两遍、每段轮数和角色顺序对不对。内容写得好不好一概不管，那是 `check.py` 的事。
+    - `generate()` 一批的完整流程：`chat` → `find_problems` → 不合格就把毛病清单接在原始 user 后面重发，最多 `max_retry` 次。每次重发都从原始 user 重新接，不把上一轮的清单叠上去。返回每次请求的官方 `usage` 原样收集，包括没跑成的那几次。
+
+16. `scripts/check.py`：质检落盘后的 JSON，判的是内容好不好，跟结构无关。词表从 `references/words.md` 抄过来，改一处得改另一处，文件开头写着这条。
+
+    硬失败（必须清零）：禁词、企业黑话、硬停词、模型路标、AI 自称、翻案腔 8 条正则、名词化 5 条正则、破折号、提示性冒号、语气词超限（单条最多一个，含两个以上长句时可到两个）、assistant 问句结尾、单条超过 `profile_max_chars`。
+
+    警告（交人判断，不拦）：单字疑似禁词（`亲` 会在「相亲」「亲戚」上误报，所以只算警告）、看语境的黑话、抒情词、疑似翻案腔变形、同句两处「挺X的」、一段之内 assistant 各条长度太齐（变异系数低于 0.40）、跨对话开场撞车（三段以上同样的四字开头）、反问收尾过密（超过三成的段落倒数第二轮用反问）。
+
+    `han()` 数汉字时排除标点，`check_message()` 判单条，`check_file()` 判一个文件并做跨对话的统计，`check_all()` 汇总打印并返回硬失败条数当退出码。
+
+---
+
+### S4 入口
+
+17. `scripts/run.py`：唯一入口，四个开关：不带参数打印预估后问一句、`--yes` 不问直接跑、`--plan` 只打印预估和余额、`--preview` 打印第一批实际会发出去的 system 和 user 且完全离线。
+
+    - `check_config()` 开跑前把 `config.yaml` 里会炸的值一次性全挑出来：没有 api_key、`profile` 拼错、`profile_max_chars` 里缺这一档、每批 0 段、并发 0 路、轮数区间倒挂。能挑的一次挑完全部列出来再退，省得改一条跑一次。
+    - `build_tasks()` 切批。扫 `input/` 下所有 JSON，按 keyword 切成一次调用 `dialogue_gen_per_call` 条讨论点。一次调用只带一个 keyword，上下文干净。`opinion` 空着的文件整个跳过，屏幕上会说明跳了哪个。
+    - 四张开跑前的面板：`panel_input` 每个领域几个关键词多少讨论点切成几批、`panel_params` 模型和形状和并发、`panel_tokens` 一次调用喂进去多少 token 并按 system 的五块拆开、`panel_estimate` 这一趟的预估用量加当前余额。
+    - `generate_all()` 并发跑。线程池按 `concurrency` 开，屏幕底部两行常驻：`_line_progress` 画进度条和刚跑完的那一批，`_line_usage` 画累计 token 和重发次数，每收到一批就重画一次，跑的过程中随时看得到烧了多少。
+    - `run_one()` 跑一批：调 `llm.generate`，成功才把原文写进 `output/raw/`。失败的批次 raw 不落盘，脏数据进不了下一步。
+    - 跑完 `panel_result` 打实际用量和余额变化加失败清单，然后依次调 `parse.parse_all` 和 `check.check_all`，最后 `panel_落盘` 打产物路径。
+
+---
+
+### 完整运行逻辑
+
+`input/` 下的讨论点 JSON 按 keyword 切成批，每批 `dialogue_gen_per_call` 条讨论点算一次调用。开跑前先拼好 system（人设 + 三份 reference 填进 `system.md` 的骨架），用本地 tokenizer 数一遍各块多少 token，连同预估用量和账户余额一起打在屏幕上等确认。
+
+确认后按 `concurrency` 路并发。每一路：拼这批的 user、发请求、拿 `parse` 那套校验判合不合格、不合格就把毛病清单接在原始 user 后面重发最多 `max_retry` 次，合格才把原文写进 `output/raw/`。屏幕底部两行实时刷进度和累计 token。
+
+全部跑完，`parse_all` 把 raw 按 `=== / U / A` 拆开组装成 `dialogues_<domain>.json`，全部解析成功才落盘并删 raw。`check_all` 拿词表和句式规则过一遍，硬失败清零才算这批能进训练集。
+
+省钱主线是 DeepSeek 的前缀缓存：system 每次调用逐字节相同，六千多 token 只有最先发出去的那几路真算钱，其余按 cache hit 计价便宜三十倍。所以一次调用只带一个 keyword，不把多个领域揉进一次请求。
+
+失败一律往安全方向失败：轮数出界的批次 raw 不落盘，任何一段解析不过整趟不落盘，硬失败非零时 `check.py` 退出码是 1。宁可少产几段，不让残数据混进训练集。
