@@ -65,14 +65,13 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
 
 ## api_key
 
-仓库里不带 key，跑之前自己填一次：
+仓库里不带 key，跑之前在根目录建一个 `secrets.yaml`，写一行：
 
-```bash
-copy secrets.example.yaml secrets.yaml
+```yaml
+api_key: sk-...
 ```
 
-打开 `secrets.yaml` 把 `api_key` 填上就能跑。这个文件在 `.gitignore` 里，
-改它不会出现在 `git status` 里，也就不会误提交。
+这个文件在 `.gitignore` 里，`git status` 看不见它，`git pull` 也不会覆盖它。
 
 也可以设环境变量 `DEEPSEEK_API_KEY`，优先级最高。
 
@@ -462,7 +461,6 @@ DataAutomation/
 ├── agentarenablueprint.md
 │
 ├── config.yaml
-├── secrets.example.yaml          # 抄成 secrets.yaml 填 api_key，后者不进仓库
 ├── requirements.txt
 │
 ├── input/                        # 讨论点 JSON
@@ -594,8 +592,6 @@ DataAutomation/
 按序读五个文件：
 
 9. `scripts/config.py`：一个 `load()`。三层叠加，后面盖前面：`config.yaml` 读全部参数，`secrets.yaml` 存在就叠上去（`.gitignore` 挡着不进仓库），环境变量 `DEEPSEEK_API_KEY` 优先级最高。`llm.py` 不读配置，`cfg` 一律由调用方传进去。
-
-    仓库里给了一份 `secrets.example.yaml`，抄一份改名成 `secrets.yaml` 填进自己的 key 即可。
 
 10. `scripts/ui/theme.py`：宽度 72 格、缩进两格、框线和方块字符、状态标记 `✓ ✗`、七个色号。`color_on()` 决定要不要上色：设了 `NO_COLOR` 不上、输出重定向到文件时不上（日志里不该有转义码）、Windows 上先用 ctypes 开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，开不了就当没有颜色。不上色时 `CODES` 里全是空串，调用处不用写 if。
 

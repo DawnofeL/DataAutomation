@@ -293,8 +293,8 @@ def check_config(cfg):
     """
     problems = []
     if not cfg.get("api_key"):
-        problems.append("没有 api_key。把 secrets.example.yaml 抄成 secrets.yaml "
-                        "填进去，或者设环境变量 DEEPSEEK_API_KEY")
+        problems.append("没有 api_key。在根目录建 secrets.yaml 写一行 "
+                        "api_key: sk-...，或者设环境变量 DEEPSEEK_API_KEY")
     if cfg["profile"] not in cfg["profiles"]:
         problems.append(f"profile 是 {cfg['profile']}，profiles 里没有这一档")
     if cfg["profile"] not in cfg["profile_max_chars"]:
