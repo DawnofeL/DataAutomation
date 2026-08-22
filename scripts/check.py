@@ -52,6 +52,9 @@ FORBIDDEN = [
     "我真的会谢",
 ]
 
+# 上面几个禁词是正常词的一截。查禁词之前先把这些正常词从文本里抠掉，不然「隔绝了」会当成「绝了」报。
+FORBIDDEN_EXCEPT = ["隔绝了", "拒绝了", "杜绝了", "断绝了", "灭绝了", "谢绝了", "根绝了"]
+
 # 企业黑话里绝对禁用的那一档，用本义的场合也不放行。
 JARGON = [
     "赋能", "抓手", "商业闭环", "价值闭环", "能力沉淀", "拉通", "底层逻辑",
@@ -190,8 +193,13 @@ def Check_Message(role: str, text: str, limit: int) -> tuple:
     hard_problems = []
     warn_problems = []
 
+    # 先抠掉「隔绝了」这类含禁词片段的正常词，剩下的文本再查禁词
+    forbidden_text = text
+    for one_word in FORBIDDEN_EXCEPT:
+        forbidden_text = forbidden_text.replace(one_word, "")
+
     for one_word in FORBIDDEN:
-        if one_word in text:
+        if one_word in forbidden_text:
             hard_problems.append(f"禁词「{one_word}」")
 
     for one_word in JARGON:
