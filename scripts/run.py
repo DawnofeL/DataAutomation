@@ -175,14 +175,15 @@ def run_one(cfg, system, task):
     """
     text, usages, error = llm.generate(
         cfg, system, task["domain"], task["keyword"], task["opinion"], task["points"])
-    if error:
-        return task, usages, error
 
+    # 重发用光了也把原文写下来。里面往往只有一两段不合格，其余能救；
+    # 整批丢掉等于连累旁边那几段。落盘前那道闸门会逐段分流。
     name = f"{task['domain']}_{task['keyword']}_{task['batch']}.txt"
     out = ROOT / cfg["output_dir"] / "raw" / name
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(text, encoding="utf-8")
-    return task, usages, None
+    if text:
+        out.write_text(text, encoding="utf-8")
+    return task, usages, error
 
 
 def generate_all(cfg, system, tasks):
@@ -275,7 +276,7 @@ def panel_result(cfg, collected, fails, before):
     ui.panel("实际", rows)
 
     if fails:
-        ui.panel(ui.warn(f"{len(fails)} 批没跑成，raw 不落盘"),
+        ui.panel(ui.warn(f"{len(fails)} 批重发用光还不合格，逐段分流"),
                  ui.table([[name, why] for name, why in fails]))
 
 

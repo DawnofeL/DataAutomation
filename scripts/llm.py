@@ -54,6 +54,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import check
 import parse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -290,7 +291,12 @@ def find_problems(cfg, text, points):
         if did not in want:
             problems.append(f"{did} 不属于这一批，删掉")
             continue
-        problems += parse.validate(did, messages, cfg)
+        structural = parse.validate(did, messages, cfg)
+        if structural:
+            problems += structural
+            continue
+        record = {"messages": [{"role": r, "content": c} for r, c in messages]}
+        problems += [f"{did} {x}" for x in check.hard_of(record, cfg, cfg["profile"])]
     problems += [f"{did} 整条没写" for did in sorted(want - seen)]
     return problems
 

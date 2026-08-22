@@ -88,6 +88,16 @@ PIVOT_SOFT = [r"我一直以为[^。！？]{1,40}(?:后来|才)",
 MODAL = "啊嘛呢咯"
 CV_FLOOR = 0.40
 
+# 模型不知道人名时会留个坑等人填，这种进了训练集就是教模型输出模板。
+PLACEHOLDER = [
+    (r"[XxＸ]{2,}|×{2,}", "占位符 XX"),
+    (r"[【】\[\]{}]", "方括号或花括号"),
+    (r"某某|张三|李四", "泛指占位"),
+]
+
+# 正文一律用「」，混进英文弯引号是模型从书面语带过来的。
+CURLY_QUOTE = r"[“”]"
+
 
 def han(s):
     return len(re.sub(r"[^一-鿿\w]", "", s))
@@ -123,6 +133,12 @@ def check_message(role, text, limit):
     if re.search(r"[：:]", text) and not re.search(r"[：:]\s*[「“\"]", text):
         hard.append("提示性冒号")
 
+    for pattern, name in PLACEHOLDER:
+        if re.search(pattern, text):
+            hard.append(name)
+    if re.search(CURLY_QUOTE, text):
+        hard.append("英文弯引号，改成「」")
+
     n_modal = sum(text.count(c) for c in MODAL)
     cap = 2 if long_clauses(text) >= 2 else 1
     if n_modal > cap:
@@ -151,6 +167,28 @@ def check_message(role, text, limit):
         warn.append("同句两处「挺X的」")
 
     return hard, warn
+
+
+def hard_of(dialogue, cfg, profile):
+    """一段对话的硬失败清单。落盘前当闸门用，也给 llm 的重发判断用。
+
+    只查单条消息级别的规则。跨对话的那些（开场撞车、反问过密）算不到
+    单段头上，留在 check_all 里当警告。
+
+    Args:
+        dialogue (dict): 一段对话，要有 messages。
+        cfg (dict): config.load() 的返回值。
+        profile (str): 用哪一档的字数上限。
+
+    Returns:
+        list[str]: 硬失败，一条一行，形如「第2条  问句结尾」。空列表表示这段能用。
+    """
+    limit = cfg["profile_max_chars"][profile]
+    out = []
+    for i, m in enumerate(dialogue["messages"], 1):
+        hard, _ = check_message(m["role"], m["content"], limit)
+        out += [f"第{i}条  {x}" for x in hard]
+    return out
 
 
 def check_file(path, cfg):
