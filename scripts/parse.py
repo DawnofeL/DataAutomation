@@ -93,7 +93,9 @@ def parse_all(cfg):
 
     points = load_points(cfg)
     passed, rejected = {}, {}
-    seen = set()
+    # 同一个讨论点可能在一份 raw 里出现两遍，好坏各一。先按 id 收着，
+    # 最后每个 id 只留一份，能过闸门的优先。
+    collected = {}
 
     for f in files:
         # 文件名是 {domain}_{keyword}_{batch}，从右边切两刀，
@@ -101,11 +103,6 @@ def parse_all(cfg):
         domain = f.stem.rsplit("_", 2)[0]
         lookup = points.get(domain, {})
         for did, msgs in parse_raw(f.read_text(encoding="utf-8")):
-            # 重发用光的批次照样落 raw，里面可能同一个讨论点写了两遍。
-            # 只收第一次出现的，不然产出数会比讨论点数还多。
-            if (domain, did) in seen:
-                continue
-            seen.add((domain, did))
             keyword, point = lookup.get(did, ("?", "?"))
             record = {
                 "source": f"{keyword}/{did}",
@@ -118,9 +115,16 @@ def parse_all(cfg):
                 problems = check.hard_of(record, cfg, cfg["profile"])
             if problems:
                 record["problems"] = problems
-                rejected.setdefault(domain, []).append(record)
-            else:
-                passed.setdefault(domain, []).append(record)
+            # 已经收过一份合格的就不换了，收过的是不合格的则让位给这一份
+            old = collected.get((domain, did))
+            if old is None or ("problems" in old and "problems" not in record):
+                collected[(domain, did)] = record
+
+    for (domain, _), record in collected.items():
+        if "problems" in record:
+            rejected.setdefault(domain, []).append(record)
+        else:
+            passed.setdefault(domain, []).append(record)
 
     written = []
     written += _write(cfg, passed, "dialogues", ok=True)
