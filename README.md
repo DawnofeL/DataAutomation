@@ -216,27 +216,15 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
 ## 命令
 
 ```bash
+cd C:\Users\Levizenith\Desktop\DataAutomation
 python scripts/run.py
 ```
 
-就这一条。切批 → 调模型 → 解析 → 质检 → 落盘，一次跑完。
 第一次跑之前先 `pip install -r requirements.txt`。
 
-三个开关，还是这一条命令：
-
-| 开关 | 干什么 |
-|---|---|
-| `--yes` | 不问「继续？」直接跑 |
-| `--plan` | 只打印预估和余额，不生成 |
-| `--preview` | 打印第一批拼好的 system 和 user，完全离线 |
-
-出了问题才用得上的三个脚本，都不发请求、不花钱：
-
-| | |
-|---|---|
-| `python scripts/parse.py` | raw 还在，重新解析一遍 |
-| `python scripts/check.py` | 重查已经落盘的 JSON |
-| `python scripts/usage.py` | 查一次余额 |
+`run.py` 带三个开关：`--yes` 不问直接跑，`--plan` 只看预估不生成，
+`--preview` 打印拼好的 system 和 user。另外 `parse.py` `check.py` `usage.py`
+三个脚本出问题时单独跑，都不发请求。
 
 ## 屏幕上
 
@@ -255,19 +243,6 @@ python scripts/run.py
   │ 长度      P2  以短句为主，偶尔一条到 60 至 80 字，其余仍然短
   │ 轮数      4 到 8 轮  由讨论点自己定，不硬凑
   │ 并发      4 路  每批 4 段 · 不合格重发 2 次
-  └
-
-  ┌─ 每次调用喂进去多少 token ────────────────────────────────────────────
-  │ system                6,449
-  │   骨架 system.md        455
-  │   人设                  232
-  │   用词                1,649
-  │   活人感              3,566
-  │   事实边界              550
-  │ user              432 - 468  随讨论点变
-  │ 单次合计              6,917  最大的一批
-  │
-  │ tokenizer/deepseek.json 真数的
   └
 
   ┌─ 预估  6 次调用 → 15 段对话 ──────────────────────────────────────────
@@ -315,23 +290,6 @@ python scripts/run.py
 重定向到文件时退化成一批一行，不带回车符。
 
 所有对齐按显示宽度算，一个汉字两格，中英文混排不会歪。
-
-## token 都花在哪
-
-`system` 每批一字不差，第二次调用起走缓存。它那六千多 token 的构成：
-
-| 块 | token | 来源 |
-|---|---|---|
-| 骨架 | 455 | `prompts/system.md` 去掉四个占位符剩下的：任务说明、衔接、硬禁令速查、交稿前自查 |
-| 人设 | 232 | `personas/default.md` |
-| 用词 | 1,649 | `references/words.md` |
-| 活人感 | 3,566 | `references/alive-dialogue.md` |
-| 事实边界 | 550 | `references/knowledge-honesty.md` |
-| **合计** | **6,449** | |
-
-数字是 `tokenizer/deepseek.json` 真跑一遍分词出来的，不是按字数估的。
-这份 tokenizer 是 DeepSeek-V3 的官方词表，仓库里带着，不联网。
-它数的是纯文本，接口返回的 `prompt_tokens` 还要加上几个 chat 模板的固定 token。
 
 ## 发出去的 system
 
@@ -661,7 +619,7 @@ DataAutomation/
 
     - `check_config()` 开跑前把 `config.yaml` 里会炸的值一次性全挑出来：没有 api_key、`profile` 拼错、`profile_max_chars` 里缺这一档、每批 0 段、并发 0 路、轮数区间倒挂。能挑的一次挑完全部列出来再退，省得改一条跑一次。
     - `build_tasks()` 切批。扫 `input/` 下所有 JSON，按 keyword 切成一次调用 `dialogue_gen_per_call` 条讨论点。一次调用只带一个 keyword，上下文干净。`opinion` 空着的文件整个跳过，屏幕上会说明跳了哪个。
-    - 四张开跑前的面板：`panel_input` 每个领域几个关键词多少讨论点切成几批、`panel_params` 模型和形状和并发、`panel_tokens` 一次调用喂进去多少 token 并按 system 的五块拆开、`panel_estimate` 这一趟的预估用量加当前余额。
+    - 四张开跑前的面板：`panel_input` 每个领域几个关键词多少讨论点切成几批、`panel_params` 模型和形状和并发、`panel_estimate` 这一趟的预估用量加当前余额。
     - `generate_all()` 并发跑。线程池按 `concurrency` 开，屏幕底部两行常驻：`_line_progress` 画进度条和刚跑完的那一批，`_line_usage` 画累计 token 和重发次数，每收到一批就重画一次，跑的过程中随时看得到烧了多少。
     - `run_one()` 跑一批：调 `llm.generate`，成功才把原文写进 `output/raw/`。失败的批次 raw 不落盘，脏数据进不了下一步。
     - 跑完 `panel_result` 打实际用量和余额变化加失败清单，然后依次调 `parse.parse_all` 和 `check.check_all`，最后 `panel_落盘` 打产物路径。

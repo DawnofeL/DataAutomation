@@ -74,7 +74,7 @@ def tag(task):
 
 
 # ====================================================================
-#  开跑前的四张面板
+#  开跑前的三张面板
 # ====================================================================
 
 
@@ -116,30 +116,6 @@ def panel_params(cfg):
         ui.kv("并发", f"{cfg['concurrency']} 路",
               f"每批 {cfg['dialogue_gen_per_call']} 段 · 不合格重发 {cfg['max_retry']} 次"),
     ])
-
-
-def panel_tokens(cfg, system, users):
-    """token 面板：一次调用喂进去多少，system 那一万字都花在哪。
-
-    Args:
-        cfg (dict): config.load() 的返回值。
-        system (str): llm.build_system() 的结果。
-        users (list[str]): 每次调用的 user 消息。
-    """
-    rows = [["system", ui.num(accounting.count(system)), ""]]
-    for name, text in llm.system_parts(cfg):
-        rows.append([f"  {name}", ui.num(accounting.count(text)), ""])
-
-    user_tokens = [accounting.count(u) for u in users]
-    lo, hi = min(user_tokens), max(user_tokens)
-    span = ui.num(lo) if lo == hi else f"{ui.num(lo)} - {ui.num(hi)}"
-    rows.append(["user", span, "随讨论点变"])
-    rows.append(["单次合计", ui.num(accounting.count(system) + hi), "最大的一批"])
-
-    body = ui.table(rows, aligns=["left", "right", "left"])
-    note = "tokenizer/deepseek.json 真数的" if accounting.exact() else \
-        "tokenizers 没装，按字数估的，pip install tokenizers 换成真数"
-    ui.panel("每次调用喂进去多少 token", body + ["", ui.dim(note)])
 
 
 def panel_estimate(cfg, system, users, n_dialogues, balance):
@@ -362,7 +338,6 @@ def main():
     ui.banner("DataAutomation · 讨论点 → 多轮对话")
     panel_input(tasks, skipped)
     panel_params(cfg)
-    panel_tokens(cfg, system, users)
     panel_estimate(cfg, system, users, n_dialogues, before)
 
     if args.plan:
