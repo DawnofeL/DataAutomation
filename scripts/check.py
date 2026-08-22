@@ -31,11 +31,12 @@ FORBIDDEN = [
     # 口语糟粕
     "屎尿屁", "心里咯噔", "哎呀妈呀", "这也太搞了", "搞笑", "奇葩",
     # 拟声词
-    "嘤嘤嘤", "哈哈", "咕咕", "呜呜", "咚咚", "隐约记得",
+    "嘤嘤嘤", "咕咕", "呜呜", "咚咚", "隐约记得",  # 「哈哈」交给 FAKE_LAUGH
     # 后缀句式
     "到爆", "到窒息",
     # 收尾套话
     "反正我是服了", "越想越离谱", "越想越不可思议", "光想想就觉得不可思议",
+    "我真的会谢",
 ]
 
 JARGON = [
@@ -88,6 +89,21 @@ PIVOT_SOFT = [r"我一直以为[^。！？]{1,40}(?:后来|才)",
 MODAL = "啊嘛呢咯"
 CV_FLOOR = 0.40
 
+# 半角标点。正文一律全角，「.」不查，小数点会误报。
+HALF_WIDTH = r"""["',;!?()]"""
+
+# 「哈哈」恰好两个是敷衍，三个以上放行。
+FAKE_LAUGH = r"(?<!哈)哈哈(?!哈)"
+
+# 一段里数笑用它，三个哈起步才算一次笑。
+REAL_LAUGH = r"哈{3,}"
+
+# 一段对话里笑最多几次。
+LAUGH_CAP = 2
+
+# 骂人写「草」不写「操」。操作、操心、体操这些正常词不算。
+SWEAR = r"操(?![作心场练纵控盘守])"
+
 # 模型不知道人名时会留个坑等人填，这种进了训练集就是教模型输出模板。
 PLACEHOLDER = [
     (r"[XxＸ]{2,}|×{2,}", "占位符 XX"),
@@ -134,6 +150,12 @@ def check_message(role, text, limit):
     for pattern, name in PLACEHOLDER:
         if re.search(pattern, text):
             hard.append(name)
+    if re.search(HALF_WIDTH, text):
+        hard.append("半角标点，改成全角")
+    if re.search(FAKE_LAUGH, text):
+        hard.append("「哈哈」两个字，要笑就多打几个")
+    if re.search(SWEAR, text):
+        hard.append("「操」改成「草」")
     n_modal = sum(text.count(c) for c in MODAL)
     cap = 2 if long_clauses(text) >= 2 else 1
     if n_modal > cap:
@@ -183,6 +205,13 @@ def hard_of(dialogue, cfg, profile):
     for i, m in enumerate(dialogue["messages"], 1):
         hard, _ = check_message(m["role"], m["content"], limit)
         out += [f"第{i}条  {x}" for x in hard]
+
+    laughs = [x for m in dialogue["messages"]
+              for x in re.findall(REAL_LAUGH, m["content"])]
+    if len(laughs) > LAUGH_CAP:
+        out.append(f"整段笑了 {len(laughs)} 次，上限 {LAUGH_CAP}")
+    elif len(laughs) == 2 and laughs[0] == laughs[1]:
+        out.append(f"两次笑同形，都是「{laughs[0]}」")
     return out
 
 
