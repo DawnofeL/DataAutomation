@@ -93,6 +93,7 @@ def parse_all(cfg):
 
     points = load_points(cfg)
     passed, rejected = {}, {}
+    seen = set()
 
     for f in files:
         # 文件名是 {domain}_{keyword}_{batch}，从右边切两刀，
@@ -100,6 +101,11 @@ def parse_all(cfg):
         domain = f.stem.rsplit("_", 2)[0]
         lookup = points.get(domain, {})
         for did, msgs in parse_raw(f.read_text(encoding="utf-8")):
+            # 重发用光的批次照样落 raw，里面可能同一个讨论点写了两遍。
+            # 只收第一次出现的，不然产出数会比讨论点数还多。
+            if (domain, did) in seen:
+                continue
+            seen.add((domain, did))
             keyword, point = lookup.get(did, ("?", "?"))
             record = {
                 "source": f"{keyword}/{did}",
