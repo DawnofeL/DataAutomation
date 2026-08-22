@@ -596,21 +596,21 @@ DataAutomation/
 
 按序读五个文件：
 
-9. `scripts/config.py`：一个 `load()`。三层叠加，后面盖前面：`config.yaml` 读全部参数，`secrets.yaml` 存在就叠上去（`.gitignore` 挡着不进仓库），环境变量 `DEEPSEEK_API_KEY` 优先级最高。`llm.py` 不读配置，`cfg` 一律由调用方传进去。
+9. `scripts/config.py`：一个 `Load_Config()`。三层叠加，后面盖前面：`config.yaml` 读全部参数，`secrets.yaml` 存在就叠上去（`.gitignore` 挡着不进仓库），环境变量 `DEEPSEEK_API_KEY` 优先级最高。`llm.py` 不读配置，`cfg` 一律由调用方传进去。
 
-10. `scripts/ui/theme.py`：宽度 72 格、缩进两格、框线和方块字符、状态标记 `✓ ✗`、七个色号。`color_on()` 决定要不要上色：设了 `NO_COLOR` 不上、输出重定向到文件时不上（日志里不该有转义码）、Windows 上先用 ctypes 开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，开不了就当没有颜色。不上色时 `CODES` 里全是空串，调用处不用写 if。
+10. `scripts/ui/theme.py`：宽度 72 格、缩进两格、框线和方块字符、状态标记 `✓ ✗`、七个色号。`Color_On()` 决定要不要上色：设了 `NO_COLOR` 不上、输出重定向到文件时不上（日志里不该有转义码）、Windows 上先用 ctypes 开 `ENABLE_VIRTUAL_TERMINAL_PROCESSING`，开不了就当没有颜色。不上色时 `CODES` 里全是空串，调用处不用写 if。
 
-11. `scripts/ui/blocks.py`：静态排版。核心是 `width()`。一个汉字在等宽终端里占两格，用 `len()` 对齐中文会歪，所以宽度按 `unicodedata.east_asian_width` 算，顺带把 ANSI 转义码剥掉不计宽。`pad()` 按显示宽度补齐，`table()` 先量每列最宽再对齐，`panel()` 画一个上边框带标题、下边框只有一个角的框，`kv()` 排「标签 值 灰色备注」一行。
+11. `scripts/ui/blocks.py`：静态排版。核心是 `Display_Width()`。一个汉字在等宽终端里占两格，用 `len()` 对齐中文会歪，所以宽度按 `unicodedata.east_asian_width` 算，顺带把 ANSI 转义码剥掉不计宽。`Pad_To_Width()` 按显示宽度补齐，`Table()` 先量每列最宽再对齐，`Panel()` 画一个上边框带标题、下边框只有一个角的框，`Key_Value()` 排「标签 值 灰色备注」一行。
 
-12. `scripts/ui/progress.py`：动态那部分。`bar()` 是纯函数，只画方块串。`Live` 占住屏幕底部固定几行，每次 `update()` 先把光标上移 `height` 行再整块重画，所以跑的时候屏幕不往下滚。非终端时退化成一步一行，只留第一行，并且剥掉转义码。
+12. `scripts/ui/progress.py`：动态那部分。`Draw_Bar()` 是纯函数，只画方块串。`Live` 占住屏幕底部固定几行，每次 `Update()` 先把光标上移 `height` 行再整块重画，所以跑的时候屏幕不往下滚。非终端时退化成一步一行，只留第一行，并且剥掉转义码。
 
 13. `scripts/usage.py`：token 和钱，两条原则：每次请求的用量一律用响应体里官方的 `usage` 对象，账户余额一律查官方 `GET /user/balance`。本地不维护价目表。
 
-    - `count()` 用 `tokenizer/deepseek.json` 真跑一遍分词。`tokenizers` 没装或词表文件不在，就退回按字符数除以 1.5 估，`exact()` 告诉调用方现在是哪种，屏幕上会写明。数出来的是纯文本 token，不含 chat 模板那几个固定 token，所以比接口返回的 `prompt_tokens` 略少几个。
-    - `merge()` 把若干次响应的 `usage` 加成一个。不挑字段，数值型的逐项相加，嵌套的 `prompt_tokens_details` 和 `completion_tokens_details` 摊平到顶层。`reasoning_tokens` 就是从这里来的，思考开着时它占输出的大头，手挑字段会漏掉它。
-    - `estimate()` 跑之前拍一份用量。输入是现成文本，真数；输出还不存在，按每条消息 25 字拍。system 每次调用一字不差，只有最先发出去的那几路 cache miss，所以按 `concurrency` 路算 miss、其余算命中。
-    - `fmt()` `line()` `rows()` 三种排法：面板里的多行、屏幕底部常驻的一行、表格行。
-    - `balance()` 查余额，任何异常都返回 `None`，查不到余额不该让整趟跑挂掉。`fmt_balance()` 把跑前跑后两个数排成一行，并注明两个数一样是正常的，DeepSeek 扣费有几分钟延迟。
+    - `Count_Tokens()` 用 `tokenizer/deepseek.json` 真跑一遍分词。`tokenizers` 没装或词表文件不在，就退回按字符数除以 1.5 估，`Is_Exact()` 告诉调用方现在是哪种，屏幕上会写明。数出来的是纯文本 token，不含 chat 模板那几个固定 token，所以比接口返回的 `prompt_tokens` 略少几个。
+    - `Merge_Usage()` 把若干次响应的 `usage` 加成一个。不挑字段，数值型的逐项相加，嵌套的 `prompt_tokens_details` 和 `completion_tokens_details` 摊平到顶层。`reasoning_tokens` 就是从这里来的，思考开着时它占输出的大头，手挑字段会漏掉它。
+    - `Estimate_Usage()` 跑之前拍一份用量。输入是现成文本，真数；输出还不存在，按每条消息 25 字拍。system 每次调用一字不差，只有最先发出去的那几路 cache miss，所以按 `concurrency` 路算 miss、其余算命中。
+    - `Format_Usage()` `Format_Usage_Line()` `Usage_Rows()` 三种排法：面板里的多行、屏幕底部常驻的一行、表格行。
+    - `Query_Balance()` 查余额，任何异常都返回 `None`，查不到余额不该让整趟跑挂掉。`Format_Balance()` 把跑前跑后两个数排成一行，并注明两个数一样是正常的，DeepSeek 扣费有几分钟延迟。
 
 ---
 
@@ -620,22 +620,22 @@ DataAutomation/
 
 14. `scripts/parse.py`：把模型吐的纯文本变成 JSON，落盘前逐段过闸门，合格的和打回的分两个文件写。
 
-    - `parse_raw()` 按 `===` 切段，读 `U ` / `A ` 前缀定角色。两处容错：行首的列表符号和序号先用 `STRIP` 剥掉；模型手滑把一条消息断成两行时，没有前缀的那行接到上一条后面，不新起一条。
-    - `validate()` 三件事：消息数是偶数（最后一条必须是 A）、轮数落在 `[min_turns, max_turns]` 区间里、角色严格交替且没有空消息。
-    - `_write()` 按合格与否写两个文件，`_report()` 把分流结果印成一张面板。
-    - `load_points()` 从 `input/` 建一张 `{领域: {讨论点id: (关键词, 讨论点原文)}}` 的表，落盘时把讨论点原文写回每段对话，方便日后追溯。
-    - `parse_all()` 扫 `output/raw/*.txt` 全部解析，逐段过两关：`validate()` 查结构，`check.hard_of()` 查内容。两关都过的进 `dialogues_<domain>.json`，任何一关没过的进 `rejected_<domain>.json` 并带上 `problems` 说明哪一条不合格。一段不合格只影响它自己，同一批里其余的照样落盘。文件名是 `{domain}_{keyword}_{batch}.txt`，从右边切两刀取领域名，这样领域名自己带下划线也不会切错。
+    - `Parse_Raw()` 按 `===` 切段，读 `U ` / `A ` 前缀定角色。两处容错：行首的列表符号和序号先用 `STRIP` 剥掉；模型手滑把一条消息断成两行时，没有前缀的那行接到上一条后面，不新起一条。
+    - `Validate_Structure()` 三件事：消息数是偶数（最后一条必须是 A）、轮数落在 `[min_turns, max_turns]` 区间里、角色严格交替且没有空消息。
+    - `_Write_Json()` 按合格与否写两个文件，`_Report_Split()` 把分流结果印成一张面板。
+    - `Load_Points()` 从 `input/` 建一张 `{领域: {讨论点id: (关键词, 讨论点原文)}}` 的表，落盘时把讨论点原文写回每段对话，方便日后追溯。
+    - `Parse_All()` 扫 `output/raw/*.txt` 全部解析，逐段过两关：`Validate_Structure()` 查结构，`check.Hard_Problems_Of()` 查内容。两关都过的进 `dialogues_<domain>.json`，任何一关没过的进 `rejected_<domain>.json` 并带上 `problems` 说明哪一条不合格。一段不合格只影响它自己，同一批里其余的照样落盘。文件名是 `{domain}_{keyword}_{batch}.txt`，从右边切两刀取领域名，这样领域名自己带下划线也不会切错。
 
       输出 JSON 顶层记 `persona` `domain` `profile` `min_turns` `max_turns`，每段自己的 `turns` 逐条记，因为轮数每段都不一样。
 
 15. `scripts/llm.py`：拼提示词 + 调模型。这个文件不读配置、不数 token、不落盘。
 
-    - `_fill()` 读 `prompts/` 下的骨架换占位符。用 `str.replace` 不用 `str.format`，因为 references 里有 JSON 示例自带大括号，走 format 会被当占位符炸掉。换之前先核对骨架里的占位符和传进来的键完全一致，多一个少一个都当场报错。宁可炸，也别拿一段带着 `{keyword}` 的提示词去调模型。
-    - `build_system()` 拼 system，结果跟具体讨论点无关，开跑前拼一次就够。`system_parts()` 把它拆成骨架和四份 reference，供屏幕上统计每块占多少 token；骨架那块是把四个占位符全填空串之后剩下的内容。
-    - `build_user()` 拼这一批的 user，`build_retry()` 拼重发时追加的那段。
-    - `chat()` 发一次请求。直接打 `urllib`，不用 openai SDK，发出去的每个字段都在 `payload` 那八行里明文摆着。`thinking` 是 DeepSeek v4 的开关，v4-flash 默认开思考。四类异常全部包成 `RuntimeError` 带上人能读的原因。
-    - `find_problems()` 判这次输出合不合格，标准跟落盘时那道闸门完全一致：先 `parse.parse_raw` 拆开、`parse.validate` 查结构，再 `check.hard_of` 查内容。查讨论点漏没漏、有没有多出不属于这批的、有没有同一条写两遍、轮数和角色顺序对不对，以及禁词、问句结尾、占位符这些硬失败。所以报 ok 的批次落盘时一定全收。
-    - `generate()` 一批的完整流程：`chat` → `find_problems` → 不合格就把毛病清单接在原始 user 后面重发，最多 `max_retry` 次。每次重发都从原始 user 重新接，不把上一轮的清单叠上去。返回每次请求的官方 `usage` 原样收集，包括没跑成的那几次。
+    - `_Fill_Template()` 读 `prompts/` 下的骨架换占位符。用 `str.replace` 不用 `str.format`，因为 references 里有 JSON 示例自带大括号，走 format 会被当占位符炸掉。换之前先核对骨架里的占位符和传进来的键完全一致，多一个少一个都当场报错。宁可炸，也别拿一段带着 `{keyword}` 的提示词去调模型。
+    - `Build_System()` 拼 system，结果跟具体讨论点无关，开跑前拼一次就够。`Split_System_Parts()` 把它拆成骨架和四份 reference，供屏幕上统计每块占多少 token；骨架那块是把四个占位符全填空串之后剩下的内容。
+    - `Build_User()` 拼这一批的 user，`Build_Retry()` 拼重发时追加的那段。
+    - `Chat_Once()` 发一次请求。直接打 `urllib`，不用 openai SDK，发出去的每个字段都在 `payload` 那八行里明文摆着。`thinking` 是 DeepSeek v4 的开关，v4-flash 默认开思考。四类异常全部包成 `RuntimeError` 带上人能读的原因。
+    - `Find_Problems()` 判这次输出合不合格，标准跟落盘时那道闸门完全一致：先 `parse.Parse_Raw` 拆开、`parse.Validate_Structure` 查结构，再 `check.Hard_Problems_Of` 查内容。查讨论点漏没漏、有没有多出不属于这批的、有没有同一条写两遍、轮数和角色顺序对不对，以及禁词、问句结尾、占位符这些硬失败。所以报 ok 的批次落盘时一定全收。
+    - `Generate_Batch()` 一批的完整流程：`Chat_Once` → `Find_Problems` → 不合格就把毛病清单接在原始 user 后面重发，最多 `max_retry` 次。每次重发都从原始 user 重新接，不把上一轮的清单叠上去。返回每次请求的官方 `usage` 原样收集，包括没跑成的那几次。
 
 16. `scripts/check.py`：质检落盘后的 JSON，判的是内容好不好，跟结构无关。词表从 `references/words.md` 抄过来，改一处得改另一处，文件开头写着这条。
 
@@ -643,7 +643,7 @@ DataAutomation/
 
     警告（交人判断，不拦）：单字疑似禁词（`亲` 会在「相亲」「亲戚」上误报，所以只算警告）、看语境的黑话、抒情词、疑似翻案腔变形、同句两处「挺X的」、一段之内 assistant 各条长度太齐（变异系数低于 0.40）、跨对话开场撞车（三段以上同样的四字开头）、反问收尾过密（超过三成的段落倒数第二轮用反问）。
 
-    `hard_of()` 判一段对话的硬失败，`parse.py` 落盘前和 `llm.py` 判要不要重发都调它，三处用的是同一套标准。`han()` 数汉字时排除标点，`check_message()` 判单条，`check_file()` 判一个文件并做跨对话的统计，`check_all()` 汇总打印并返回硬失败条数当退出码。因为闸门在前面挡着，`dialogues_*.json` 上跑 `check_all()` 硬失败应该恒为 0，非 0 就是闸门漏了。
+    `Hard_Problems_Of()` 判一段对话的硬失败，`parse.py` 落盘前和 `llm.py` 判要不要重发都调它，三处用的是同一套标准。`Count_Han()` 数汉字时排除标点，`Check_Message()` 判单条，`Check_File()` 判一个文件并做跨对话的统计，`Check_All()` 汇总打印并返回硬失败条数当退出码。因为闸门在前面挡着，`dialogues_*.json` 上跑 `Check_All()` 硬失败应该恒为 0，非 0 就是闸门漏了。
 
 17. `scripts/test_wordlists.py`：`check.py` 的词表是从 `words.md` 手抄的，两边各自能改。这个脚本把 103 个词摆在一起比，对不上就列出来并以非零码退出。翻案腔和名词化是正则，`words.md` 里没有对应词表，不比。
 
@@ -653,12 +653,12 @@ DataAutomation/
 
 18. `scripts/run.py`：唯一入口，四个开关：不带参数打印预估后问一句、`--yes` 不问直接跑、`--plan` 只打印预估和余额、`--preview` 打印第一批实际会发出去的 system 和 user 且完全离线。
 
-    - `check_config()` 开跑前把 `config.yaml` 里会炸的值一次性全挑出来：没有 api_key、`profile` 拼错、`profile_max_chars` 里缺这一档、每批 0 段、并发 0 路、轮数区间倒挂。能挑的一次挑完全部列出来再退，省得改一条跑一次。
-    - `build_tasks()` 切批。扫 `input/` 下所有 JSON，按 keyword 切成一次调用 `dialogue_gen_per_call` 条讨论点。一次调用只带一个 keyword，上下文干净。`opinion` 空着的文件整个跳过，屏幕上会说明跳了哪个。
-    - 四张开跑前的面板：`panel_input` 每个领域几个关键词多少讨论点切成几批、`panel_params` 模型和形状和并发、`panel_estimate` 这一趟的预估用量加当前余额。
-    - `generate_all()` 并发跑。线程池按 `concurrency` 开，屏幕底部两行常驻：`_line_progress` 画进度条和刚跑完的那一批，`_line_usage` 画累计 token 和重发次数，每收到一批就重画一次，跑的过程中随时看得到烧了多少。
-    - `run_one()` 跑一批：调 `llm.generate`，成功才把原文写进 `output/raw/`。失败的批次 raw 不落盘，脏数据进不了下一步。
-    - 跑完 `panel_result` 打实际用量和余额变化加失败清单，然后依次调 `parse.parse_all` 和 `check.check_all`，最后 `panel_落盘` 打产物路径。
+    - `Check_Config()` 开跑前把 `config.yaml` 里会炸的值一次性全挑出来：没有 api_key、`profile` 拼错、`profile_max_chars` 里缺这一档、每批 0 段、并发 0 路、轮数区间倒挂。能挑的一次挑完全部列出来再退，省得改一条跑一次。
+    - `Build_Tasks()` 切批。扫 `input/` 下所有 JSON，按 keyword 切成一次调用 `dialogue_gen_per_call` 条讨论点。一次调用只带一个 keyword，上下文干净。`opinion` 空着的文件整个跳过，屏幕上会说明跳了哪个。
+    - 四张开跑前的面板：`Panel_Input` 每个领域几个关键词多少讨论点切成几批、`Panel_Params` 模型和形状和并发、`Panel_Estimate` 这一趟的预估用量加当前余额。
+    - `Generate_All()` 并发跑。线程池按 `concurrency` 开，屏幕底部两行常驻：`_Line_Progress` 画进度条和刚跑完的那一批，`_Line_Usage` 画累计 token 和重发次数，每收到一批就重画一次，跑的过程中随时看得到烧了多少。
+    - `Run_One_Batch()` 跑一批：调 `llm.Generate_Batch`，成功才把原文写进 `output/raw/`。失败的批次 raw 不落盘，脏数据进不了下一步。
+    - 跑完 `Panel_Result` 打实际用量和余额变化加失败清单，然后依次调 `parse.Parse_All` 和 `check.Check_All`，最后 `panel_落盘` 打产物路径。
 
 ---
 
@@ -668,7 +668,7 @@ DataAutomation/
 
 确认后按 `concurrency` 路并发。每一路：拼这批的 user、发请求、拿 `parse` 那套校验判合不合格、不合格就把毛病清单接在原始 user 后面重发最多 `max_retry` 次，合格才把原文写进 `output/raw/`。屏幕底部两行实时刷进度和累计 token。
 
-全部跑完，`parse_all` 把 raw 按 `=== / U / A` 拆开组装成 `dialogues_<domain>.json`，全部解析成功才落盘并删 raw。`check_all` 拿词表和句式规则过一遍，硬失败清零才算这批能进训练集。
+全部跑完，`Parse_All` 把 raw 按 `=== / U / A` 拆开，逐段过闸门，合格的进 `dialogues_<domain>.json`，打回的进 `rejected_<domain>.json`，然后删掉 raw。`Check_All` 再把落盘的那份过一遍，硬失败恒为 0 才算闸门没漏。
 
 省钱主线是 DeepSeek 的前缀缓存：system 每次调用逐字节相同，六千多 token 只有最先发出去的那几路真算钱，其余按 cache hit 计价便宜三十倍。所以一次调用只带一个 keyword，不把多个领域揉进一次请求。
 

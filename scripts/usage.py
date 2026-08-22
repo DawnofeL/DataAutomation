@@ -1,19 +1,38 @@
-#!/usr/bin/env python3
-"""token 用量和花费。
+"""数 token、汇总用量、查账户余额。
 
-数字一律用 DeepSeek 官方给的，不自己算价：
+本文件按四组定义函数：
 
-    每次请求的用量   响应体里的 usage 对象，字段原样收下，一个都不挑
-    账户余额         GET /user/balance
+数 token 组
 
-跑之前还没有请求可查，输入部分用 tokenizer/deepseek.json 真数一遍，
-输出部分只能按字数拍。
+- `_Get_Tokenizer`：建好本地词表对象并缓存，只被下面两个调用。
+- `Is_Exact`：告诉调用方现在的 token 数是真数出来的还是按字数估的。
+- `Count_Tokens`：一段文本多少 token。
 
-不在这里换算成钱：DeepSeek 扣费有延迟，一趟跑完余额通常纹丝不动，过一阵才扣。
-所以余额只跑前跑后各打一次给你看，不拿差值当这一趟的花费。要精确对账去
-platform.deepseek.com 的账单页。
+汇总组
 
-    python scripts/usage.py       查一次余额
+- `Merge_Usage`：把若干次请求返回的官方用量对象加成一个。
+- `Format_Usage`：汇总结果排成一行，给面板用。
+- `Format_Usage_Line`：汇总结果压成定宽的一行，给屏幕底部常驻那块用。
+- `Usage_Rows`：汇总结果拆成表格行，给 `ui.Table` 用。
+
+预估组
+
+- `Estimate_Usage`：开跑前拍一份用量，字段名和官方对齐，能直接喂给上面三个。
+
+余额组
+
+- `Query_Balance`：调官方接口查账户余额。
+- `Format_Balance`：把跑前跑后两个余额排成一行。
+
+数字一律用 DeepSeek 官方给的：每次请求的用量取响应体里的 `usage` 对象（接口
+自己返回的 token 计数），账户余额调 `GET /user/balance`。本地不维护价目表，
+也不把 token 换算成钱。跑之前还没有请求可查，那时候输入部分用
+`tokenizer/deepseek.json`（DeepSeek 官方词表文件）真数一遍，输出部分只能按
+字数拍。
+
+单独查一次余额：
+
+    python scripts/usage.py
 """
 
 import json
@@ -24,244 +43,286 @@ from decimal import Decimal
 
 import config
 
-# 官方 tokenizer，仓库里带着，不联网。
-TOKENIZER = config.ROOT / "tokenizer" / "deepseek.json"
 
-# tokenizers 装不上时退回按字符估：1 个 token 约 1.5 个中文字符。
+# ---------- 配置区 ----------
+
+# 官方词表文件，仓库里带着，数 token 时不联网。
+TOKENIZER_PATH = config.ROOT / "tokenizer" / "deepseek.json"
+
+# tokenizers 这个包装不上时退回按字符估：1 个 token 约等于 1.5 个中文字符。
 CHARS_PER_TOKEN = 1.5
 
-# 模型每条消息平均多少字。对话还没生成，输出量只能这么拍。
+# 模型每条消息平均多少字。对话还没生成出来，输出量只能按这个拍。
 CHARS_PER_MESSAGE = 25
 
-# Tokenizer 实例只建一次，建好了放这儿。
-_TOKENIZER = None
-
-# 打印时按这个顺序取 usage 里的字段，取不到就不印。
-# 名字全部照抄 DeepSeek 响应体，不重命名。
-SHOWN = [
+# 打印用量时按这个顺序取字段，取不到或者为 0 就不印。键名照抄 DeepSeek 响应体，方便对照官方文档。
+SHOWN_FIELDS = [
     ("prompt_cache_miss_tokens", "输入未命中"),
     ("prompt_cache_hit_tokens", "输入命中缓存"),
     ("completion_tokens", "输出"),
     ("reasoning_tokens", "其中思考"),
 ]
 
+# 屏幕底部常驻那一行只印这三项，且宽度固定，跑的时候数字长大也不左右跳。
+LINE_FIELDS = [
+    ("prompt_cache_miss_tokens", "输入未命中"),
+    ("prompt_cache_hit_tokens", "命中缓存"),
+    ("completion_tokens", "输出"),
+]
 
-# ====================================================================
-#  数 token
-# ====================================================================
+# 建好的词表对象存这里，只建一次。None 表示还没试过，False 表示试过但建不起来。
+_TOKENIZER_CACHE = None
 
 
-def _tokenizer():
-    """建好的 Tokenizer，或者 None。
+# ---------- 数 token ----------
 
-    tokenizers 没装、或者 tokenizer/deepseek.json 不在，都返回 None，
-    调用方退回按字符估。缺个 token 计数不该让整条流水线跑不起来。
+
+def _Get_Tokenizer():
+    """
+    拿到建好的词表对象，拿不到就返回 None。
+
+    tokenizers 这个第三方包没装、或者 `tokenizer/deepseek.json` 这个词表文件
+    不在，都返回 None，让调用方退回按字符估。少一个精确的 token 计数不该让整条
+    流水线跑不起来。
 
     Returns:
-        object | None: tokenizers.Tokenizer 实例。
+        tokenizers 库的 Tokenizer 实例，建不起来时返回 None。
     """
-    global _TOKENIZER
-    if _TOKENIZER is None:
+
+    global _TOKENIZER_CACHE
+
+    # None 表示还没试过，试一次之后要么存实例要么存 False，不重复试
+    if _TOKENIZER_CACHE is None:
         try:
+
+            # tokenizers 是 HuggingFace 出的分词库，from_file 直接吃官方那份 json 词表
             from tokenizers import Tokenizer
+            _TOKENIZER_CACHE = Tokenizer.from_file(str(TOKENIZER_PATH))
 
-            _TOKENIZER = Tokenizer.from_file(str(TOKENIZER))
         except Exception:
-            _TOKENIZER = False
-    return _TOKENIZER or None
+            _TOKENIZER_CACHE = False
+
+    return _TOKENIZER_CACHE or None
 
 
-def exact():
-    """token 数是真数出来的还是估出来的。
+def Is_Exact() -> bool:
+    """
+    现在的 token 数是真数出来的还是估出来的。
+
+    屏幕上要据此写明数字的来源，估出来的不能让人当成准数看。
 
     Returns:
-        bool: 真数返回 True。
+        真跑分词返回 True，退回按字数估返回 False。
     """
-    return _tokenizer() is not None
+
+    return _Get_Tokenizer() is not None
 
 
-def count(text):
-    """一段文本多少 token。
+def Count_Tokens(text: str) -> int:
+    """
+    数一段文本有多少 token。
 
-    有 tokenizer 就真跑一遍分词，没有就按字符数除以 CHARS_PER_TOKEN 估。
-    数出来的是纯文本的 token 数，不含 chat 模板那几个固定 token，所以会比
-    接口返回的 prompt_tokens 略少几个。
+    有词表就真跑一遍分词，没有就按字符数除以 `CHARS_PER_TOKEN` 估。数出来的是
+    纯文本的 token 数，不含 chat 模板那几个固定 token（接口在消息前后自动加的
+    角色标记），所以会比接口返回的 `prompt_tokens` 略少几个。
 
     Args:
-        text (str): 任意文本。
-
+        text: 任意文本。
     Returns:
-        int: token 数。
+        token 数。
     """
-    tokenizer = _tokenizer()
-    if tokenizer is None:
+
+    tokenizer_obj = _Get_Tokenizer()
+    if tokenizer_obj is None:
         return int(len(text) / CHARS_PER_TOKEN)
-    return len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+    # add_special_tokens 关掉，只数正文，不让它自己往前后加起止标记
+    return len(tokenizer_obj.encode(text, add_special_tokens = False).ids)
 
 
-# ====================================================================
-#  官方用量：汇总响应体里的 usage
-# ====================================================================
+# ---------- 汇总官方用量 ----------
 
 
-def merge(usages):
-    """把若干个官方 usage 对象加成一个。
+def Merge_Usage(usage_list: list) -> dict:
+    """
+    把若干次请求返回的官方用量对象加成一个。
 
-    不挑字段：DeepSeek 给什么就加什么，数值型的逐项相加，嵌套的
-    prompt_tokens_details / completion_tokens_details 摊平到顶层
-    （reasoning_tokens、cached_tokens 就是从这里来的）。以后接口加了新字段，
-    这里不用改也能跟着统计到。
+    不挑字段，DeepSeek 给什么就统计什么。数值型的逐项相加，嵌套的
+    `prompt_tokens_details` 和 `completion_tokens_details`（官方把细分项放在
+    这两个子字典里）摊平到顶层，`reasoning_tokens` 就是从这里来的。以后接口
+    新增字段，这里不用改也能跟着统计到。
 
     Args:
-        usages (list[dict]): 每次请求响应体里的 usage，原样传进来。
-
+        usage_list: 每次请求响应体里的 `usage`，原样传进来。
     Returns:
-        dict[str, int]: 字段名照抄官方，值是各次之和。
+        字段名照抄官方，值是各次之和。
     """
-    total = {}
-    for usage in usages:
-        for key, value in (usage or {}).items():
-            if isinstance(value, dict):
-                for sub_key, sub_value in value.items():
+
+    total_usage = {}
+    for one_usage in usage_list:
+        for field_name, field_value in (one_usage or {}).items():
+
+            # 嵌套的细分项摊平一层，把里面的整数直接提到顶层同名键上
+            if isinstance(field_value, dict):
+                for sub_name, sub_value in field_value.items():
                     if isinstance(sub_value, int):
-                        total[sub_key] = total.get(sub_key, 0) + sub_value
-            elif isinstance(value, int):
-                total[key] = total.get(key, 0) + value
-    return total
+                        total_usage[sub_name] = total_usage.get(sub_name, 0) + sub_value
+
+            elif isinstance(field_value, int):
+                total_usage[field_name] = total_usage.get(field_name, 0) + field_value
+
+    return total_usage
 
 
-def fmt(total):
-    """把汇总后的用量排成一行给人看。
+def Format_Usage(total_usage: dict) -> str:
+    """
+    把汇总后的用量排成一行给人看，单位是万。
 
     Args:
-        total (dict[str, int]): merge() 的返回值，或者形状相同的预估。
-
+        total_usage: `Merge_Usage` 的返回值，或者形状相同的预估。
     Returns:
-        str: 形如「输入未命中 0.3 万  输入命中缓存 12.8 万  输出 7.3 万」。
+        形如「输入未命中 0.3 万  输入命中缓存 12.8 万  输出 7.3 万」，全为 0 时返回「无」。
     """
-    parts = [f"{label} {total[key] / 1e4:.1f} 万" for key, label in SHOWN if total.get(key)]
+
+    parts = [
+        f"{label} {total_usage[key_name] / 1e4:.1f} 万"
+        for key_name, label in SHOWN_FIELDS if total_usage.get(key_name)
+    ]
     return "  ".join(parts) if parts else "无"
 
 
-def line(total):
-    """把用量压成一行，给屏幕底部常驻那块用。
+def Format_Usage_Line(total_usage: dict) -> str:
+    """
+    把用量压成定宽的一行，给屏幕底部常驻那块用。
 
-    数值对齐到固定宽度，跑的时候数字在长大，位置不会左右跳。
+    数值右对齐到 7 格，跑的过程中数字一直在长大，固定宽度才不会左右跳。
 
     Args:
-        total (dict[str, int]): merge() 的返回值。
-
+        total_usage: `Merge_Usage` 的返回值。
     Returns:
-        str: 形如「输入 20,700  命中 19,200  输出 1,440」。
+        形如「输入未命中  20,700  命中缓存  19,200  输出   1,440」。
     """
+
     return "  ".join(
-        f"{label} {total.get(key, 0):>7,}"
-        for key, label in [("prompt_cache_miss_tokens", "输入未命中"),
-                           ("prompt_cache_hit_tokens", "命中缓存"),
-                           ("completion_tokens", "输出")]
+        f"{label} {total_usage.get(key_name, 0):>7,}"
+        for key_name, label in LINE_FIELDS
     )
 
 
-def rows(total):
-    """汇总后的用量拆成表格行，给 ui.table() 用。
+def Usage_Rows(total_usage: dict) -> list:
+    """
+    把汇总后的用量拆成表格行。
 
     Args:
-        total (dict[str, int]): merge() 的返回值，或者形状相同的预估。
-
+        total_usage: `Merge_Usage` 的返回值，或者形状相同的预估。
     Returns:
-        list[list[str]]: [[名目, 数值], ...]，值为 0 的项不出现。
+        形如 `[["输出", "3,640"], ...]`，值为 0 的项不出现。喂给 `ui.Table`。
     """
-    return [[label, f"{total[key]:,}"] for key, label in SHOWN if total.get(key)]
+
+    return [
+        [label, f"{total_usage[key_name]:,}"]
+        for key_name, label in SHOWN_FIELDS if total_usage.get(key_name)
+    ]
 
 
-# ====================================================================
-#  开跑前的预估
-# ====================================================================
+# ---------- 开跑前的预估 ----------
 
 
-def estimate(cfg, system, users, n_dialogues):
-    """开跑前拍一个用量，字段名和官方 usage 对齐，能直接喂给 fmt()。
+def Estimate_Usage(cfg: dict, system_text: str, user_texts: list, dialogue_count: int) -> dict:
+    """
+    开跑前拍一份用量，字段名和官方对齐，能直接喂给上面几个格式化函数。
 
-    输入是现成的文本，用 tokenizer 真数。输出还不存在，只能按每条消息多少字拍。
+    输入部分是现成的文本，用词表真数。输出部分还不存在，只能按每条消息多少字拍。
 
-    system 每次调用一字不差，只有最先发出去的那几路会 cache miss，后面都命中。
-    并发几路就按几路 miss 算。输出按 max_turns 算，都往贵了估。
+    system 消息每次调用一字不差，走 DeepSeek 的前缀缓存，只有最先发出去的那几路
+    会算未命中，后面的都按命中计价。并发几路就按几路未命中算，估得保守一点。
+    输出按 `max_turns` 算，也往贵了估。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 concurrency、max_turns。
-        system (str): llm.build_system() 的结果。
-        users (list[str]): 每次调用的 user 消息。
-        n_dialogues (int): 这一趟一共要产出几段对话。
-
+        cfg: `config.Load_Config` 的返回值，用到 concurrency 和 max_turns。
+        system_text: 拼好的 system 消息。
+        user_texts: 每次调用的 user 消息。
+        dialogue_count: 这一趟一共要产出几段对话。
     Returns:
-        dict[str, int]: 字段名照抄官方 usage。
+        字段名照抄官方 usage 的字典。
     """
-    system_tokens = count(system)
-    miss_calls = min(cfg["concurrency"], len(users))
+
+    system_tokens = Count_Tokens(system_text)
+
+    # 并发几路，最先发出去的就有几路撞不上缓存；调用总数比并发少时按调用总数算
+    miss_call_count = min(cfg["concurrency"], len(user_texts))
+
     return {
         "prompt_cache_miss_tokens": (
-            system_tokens * miss_calls + sum(count(u) for u in users)
+            system_tokens * miss_call_count + sum(Count_Tokens(u) for u in user_texts)
         ),
-        "prompt_cache_hit_tokens": system_tokens * max(0, len(users) - miss_calls),
+        "prompt_cache_hit_tokens": system_tokens * max(0, len(user_texts) - miss_call_count),
         "completion_tokens": int(
-            n_dialogues * cfg["max_turns"] * 2 * CHARS_PER_MESSAGE / CHARS_PER_TOKEN
+            dialogue_count * cfg["max_turns"] * 2 * CHARS_PER_MESSAGE / CHARS_PER_TOKEN
         ),
     }
 
 
-# ====================================================================
-#  真实花费：查余额
-# ====================================================================
+# ---------- 查余额 ----------
 
 
-def balance(cfg):
-    """查账户余额。官方接口 GET /user/balance。
+def Query_Balance(cfg: dict):
+    """
+    查账户余额，走官方接口 `GET /user/balance`。
 
-    跑前跑后各查一次，相减就是这一趟真花的钱，不需要在本地维护价目表。
+    跑前跑后各查一次就能看出这一趟大概扣了多少，不需要在本地维护一份会过期的
+    价目表。任何异常都返回 None，查不到余额不该让整趟跑挂掉。
 
     Args:
-        cfg (dict): config.yaml 的内容。用到 base_url、api_key、timeout。
-
+        cfg: `config.Load_Config` 的返回值，用到 base_url、api_key、timeout。
     Returns:
-        tuple[Decimal, str] | None: (余额, 币种)。查不到返回 None，
-            余额只用来打印，不该因为查不到就把整趟跑挂掉。
+        `(余额, 币种)` 这样一个元组，查不到时返回 None。
     """
-    request = urllib.request.Request(
+
+    request_obj = urllib.request.Request(
         cfg["base_url"].rstrip("/") + "/user/balance",
-        headers={"Authorization": "Bearer " + cfg["api_key"]},
+        headers = {"Authorization": "Bearer " + cfg["api_key"]},
     )
+
     try:
-        with urllib.request.urlopen(request, timeout=cfg["timeout"]) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        infos = body["balance_infos"]
-        # 账号可能同时挂着 USD 和 CNY 两格，其中一格是 0。挑有钱的那格，
-        # 都是 0 就用第一格。直接取 [0] 会印出「0.00 USD」。
-        info = next((x for x in infos if Decimal(x["total_balance"])), infos[0])
-        return Decimal(info["total_balance"]), info["currency"]
-    except (urllib.error.URLError, KeyError, IndexError, ValueError, StopIteration):
+        with urllib.request.urlopen(request_obj, timeout = cfg["timeout"]) as response_obj:
+            body_data = json.loads(response_obj.read().decode("utf-8"))
+
+        # 账号可能同时挂着 USD 和 CNY 两格，其中一格是 0。挑有钱的那格，都是 0 就用第一格
+        balance_infos = body_data["balance_infos"]
+        picked = next(
+            (one for one in balance_infos if Decimal(one["total_balance"])),
+            balance_infos[0],
+        )
+        return Decimal(picked["total_balance"]), picked["currency"]
+
+    except (urllib.error.URLError, KeyError, IndexError, ValueError):
         return None
 
 
-def fmt_balance(before, after):
-    """把跑前跑后两次余额排成一行给人看。
+def Format_Balance(before, after) -> str:
+    """
+    把跑前跑后两次余额排成一行给人看。
 
-    两个数一样是正常的，DeepSeek 扣费有延迟，不代表这一趟没花钱。
+    两个数一样是正常的，DeepSeek 扣费有几分钟延迟，不代表这一趟没花钱。
 
     Args:
-        before (tuple | None): 跑之前 balance() 的返回值。
-        after (tuple | None): 跑完之后 balance() 的返回值。
-
+        before: 跑之前 `Query_Balance` 的返回值。
+        after: 跑完之后 `Query_Balance` 的返回值。
     Returns:
-        str: 形如「97.31 → 96.85 CNY（扣费有延迟，两个数一样是正常的）」。
-            查不到就说查不到。
+        形如「97.31 → 96.85 CNY（扣费有延迟，两个数一样是正常的）」，任一次没查到就返回「查不到」。
     """
+
     if not before or not after:
         return "查不到"
+
     return f"{before[0]} → {after[0]} {after[1]}（扣费有延迟，两个数一样是正常的）"
 
 
 if __name__ == "__main__":
-    current = balance(config.load())
-    if not current:
+
+    current_balance = Query_Balance(config.Load_Config())
+    if not current_balance:
         sys.exit("查不到余额")
-    print(f"余额 {current[0]} {current[1]}")
+
+    print(f"余额 {current_balance[0]} {current_balance[1]}")
