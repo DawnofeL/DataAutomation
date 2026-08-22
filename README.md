@@ -65,13 +65,19 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
 
 ## api_key
 
-三个地方都能放，后面的盖前面的。现在 key 写在 `config.yaml` 里，直接能跑。
+仓库里不带 key，跑之前自己填一次：
 
-| 放哪 | 进不进仓库 |
-|---|---|
-| `config.yaml` 里 `api_key: sk-...` | 进 |
-| `secrets.yaml`（抄 `secrets.example.yaml`） | 不进，`.gitignore` 挡着 |
-| 环境变量 `DEEPSEEK_API_KEY` | 不进 |
+```bash
+copy secrets.example.yaml secrets.yaml
+```
+
+打开 `secrets.yaml` 把 `api_key` 填上就能跑。这个文件在 `.gitignore` 里，
+改它不会出现在 `git status` 里，也就不会误提交。
+
+也可以设环境变量 `DEEPSEEK_API_KEY`，优先级最高。
+
+`config.yaml` 里那行 `api_key` 是注释掉的，别在那儿填。那个文件进仓库，
+在里面填了 key，下次 `git add -A` 就一起推上去了。
 
 ## `config.yaml`
 
