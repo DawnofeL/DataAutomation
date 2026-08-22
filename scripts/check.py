@@ -95,8 +95,6 @@ PLACEHOLDER = [
     (r"某某|张三|李四", "泛指占位"),
 ]
 
-# 正文一律用「」，混进英文弯引号是模型从书面语带过来的。
-CURLY_QUOTE = r"[“”]"
 
 
 def han(s):
@@ -136,9 +134,6 @@ def check_message(role, text, limit):
     for pattern, name in PLACEHOLDER:
         if re.search(pattern, text):
             hard.append(name)
-    if re.search(CURLY_QUOTE, text):
-        hard.append("英文弯引号，改成「」")
-
     n_modal = sum(text.count(c) for c in MODAL)
     cap = 2 if long_clauses(text) >= 2 else 1
     if n_modal > cap:
