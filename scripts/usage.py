@@ -233,9 +233,12 @@ def balance(cfg):
     try:
         with urllib.request.urlopen(request, timeout=cfg["timeout"]) as response:
             body = json.loads(response.read().decode("utf-8"))
-        info = body["balance_infos"][0]
+        infos = body["balance_infos"]
+        # 账号可能同时挂着 USD 和 CNY 两格，其中一格是 0。挑有钱的那格，
+        # 都是 0 就用第一格。直接取 [0] 会印出「0.00 USD」。
+        info = next((x for x in infos if Decimal(x["total_balance"])), infos[0])
         return Decimal(info["total_balance"]), info["currency"]
-    except (urllib.error.URLError, KeyError, IndexError, ValueError):
+    except (urllib.error.URLError, KeyError, IndexError, ValueError, StopIteration):
         return None
 
 

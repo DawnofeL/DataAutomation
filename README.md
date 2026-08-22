@@ -65,7 +65,7 @@ input/topics_*.json  →  run.py  →  output/dialogues_*.json
 
 ## api_key
 
-三个地方都能放，后面的盖前面的：
+三个地方都能放，后面的盖前面的。现在 key 写在 `config.yaml` 里，直接能跑。
 
 | 放哪 | 进不进仓库 |
 |---|---|
