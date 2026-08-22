@@ -216,18 +216,27 @@ token 数不自己数，直接汇总每次响应里官方的 `usage` 对象，�
 ## 命令
 
 ```bash
-pip install -r requirements.txt
-
-python scripts/run.py            打印预估，等确认后跑
-python scripts/run.py --yes      不问直接跑
-python scripts/run.py --plan     只打印预估和余额，不生成
-python scripts/run.py --preview  打印第一批拼好的 system 和 user，完全离线
-python scripts/parse.py          重新解析 output/raw/，不花钱
-python scripts/check.py          重查 output/dialogues_*.json，不花钱
-python scripts/usage.py          查一次余额
+python scripts/run.py
 ```
 
-`tokenizers` 用来真数 token，没装也能跑，token 数退化成按字数估。
+就这一条。切批 → 调模型 → 解析 → 质检 → 落盘，一次跑完。
+第一次跑之前先 `pip install -r requirements.txt`。
+
+三个开关，还是这一条命令：
+
+| 开关 | 干什么 |
+|---|---|
+| `--yes` | 不问「继续？」直接跑 |
+| `--plan` | 只打印预估和余额，不生成 |
+| `--preview` | 打印第一批拼好的 system 和 user，完全离线 |
+
+出了问题才用得上的三个脚本，都不发请求、不花钱：
+
+| | |
+|---|---|
+| `python scripts/parse.py` | raw 还在，重新解析一遍 |
+| `python scripts/check.py` | 重查已经落盘的 JSON |
+| `python scripts/usage.py` | 查一次余额 |
 
 ## 屏幕上
 
