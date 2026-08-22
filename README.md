@@ -1,5 +1,10 @@
 ## DataAutomation
 
+```bash
+cd /mnt/c/Users/leviz/Desktop/DataAutomation/DataAutomation
+python scripts/run.py
+```
+
 把讨论点变成多轮对话数据。
 
 ```
